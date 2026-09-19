@@ -1,0 +1,5 @@
+[  
+  {    "id": 1,    "name": "Wireless Mouse",    "price": 25.99,    "image": "https://via.placeholder.com/200x200?text=Mouse",    "description": "Ergonomic wireless mouse with adjustable DPI."  },  
+  {    "id": 2,    "name": "Mechanical Keyboard",    "price": 79.99,    "image": "https://via.placeholder.com/200x200?text=Keyboard",    "description": "RGB mechanical keyboard with blue switches."  },  
+  {    "id": 3,    "name": "HD Monitor",    "price": 199.99,    "image": "https://via.placeholder.com/200x200?text=Monitor",    "description": "24-inch Full HD monitor with ultra-thin bezel."  },  
+  {    "id": 4,    "name": "USB-C Hub",    "price": 49.99,    "image": "https://via.placeholder.com/200x200?text=Hub",    "description": "Multi-port USB-C hub with HDMI and Ethernet."  }]

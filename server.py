@@ -20,12 +20,27 @@ import subprocess
 import shutil
 import re
 import time
+import shlex
 from pathlib import Path
 
 PORT = 8080
 BASE_DIR = Path(__file__).resolve().parent
 WORKSPACE_DIR = BASE_DIR / "workspace"
 WORKSPACE_DIR.mkdir(exist_ok=True)
+
+# Auto-discover and prepend Git Unix utilities (sed, grep, awk, head, tail, wc, etc.) to PATH on Windows
+if sys.platform.startswith("win"):
+    git_candidate_paths = [
+        r"C:\Program Files\Git\usr\bin",
+        r"C:\Program Files\Git\bin",
+        r"C:\Program Files (x86)\Git\usr\bin",
+        r"C:\Program Files (x86)\Git\bin",
+        os.path.expanduser(r"~\AppData\Local\Programs\Git\usr\bin"),
+        os.path.expanduser(r"~\AppData\Local\Programs\Git\bin"),
+    ]
+    valid_git_dirs = [p for p in git_candidate_paths if os.path.isdir(p)]
+    if valid_git_dirs:
+        os.environ["PATH"] = ";".join(valid_git_dirs) + ";" + os.environ.get("PATH", "")
 
 # Preconfigured default keys provided by user
 DEFAULT_GROQ_KEY = os.environ.get(
@@ -309,6 +324,8 @@ class FrAIdayHandler(http.server.SimpleHTTPRequestHandler):
     def handle_list_files(self):
         files_list = []
         for root, dirs, files in os.walk(WORKSPACE_DIR):
+            # Prune vendor, version control, and temporary caches to keep workspace explorer clean
+            dirs[:] = [d for d in dirs if d not in ('node_modules', '.git', '__pycache__', '.system_generated', '.cache')]
             for f in files:
                 full = Path(root) / f
                 rel = full.relative_to(WORKSPACE_DIR).as_posix()
@@ -447,55 +464,273 @@ class FrAIdayHandler(http.server.SimpleHTTPRequestHandler):
 
     def handle_terminal_exec(self, body):
         cmd = body.get("command", "").strip()
-        if not cmd:
-            self.send_json(400, {"error": "Missing command"})
-            return
+        res = self.run_workspace_command(cmd, exec_dir=WORKSPACE_DIR)
+        self.send_json(200, res)
 
+    def run_workspace_command(self, cmd, exec_dir=WORKSPACE_DIR, timeout=90):
+        if not cmd:
+            return {"CommandLine": "", "command": "", "stdout": "", "stderr": "No command provided", "exit_code": 1}
+
+        # 1. Safety verification
         dangerous = ["rm -rf /", "mkfs", ":(){ :|:& };:"]
         for d in dangerous:
             if d in cmd:
-                self.send_json(403, {"error": "Blocked potentially destructive system command", "stdout": "", "stderr": f"Command rejected by safety policy: {cmd}", "exit_code": 1})
-                return
+                return {
+                    "CommandLine": cmd,
+                    "command": cmd,
+                    "stdout": "",
+                    "stderr": f"Command rejected by safety policy: {cmd}",
+                    "exit_code": 1
+                }
 
-        try:
-            # On Windows, ensure python and pip commands invoke sys.executable safely
-            executable_cmd = cmd
-            if executable_cmd.startswith("python "):
-                executable_cmd = f'"{sys.executable}" ' + executable_cmd[7:]
-            elif executable_cmd == "python":
-                executable_cmd = f'"{sys.executable}"'
-            elif executable_cmd.startswith("pip "):
-                executable_cmd = f'"{sys.executable}" -m pip ' + executable_cmd[4:]
-            elif executable_cmd == "pip":
-                executable_cmd = f'"{sys.executable}" -m pip'
+        raw_cmd = cmd.strip()
 
-            proc = subprocess.Popen(
-                executable_cmd,
-                shell=True,
-                cwd=str(WORKSPACE_DIR),
+        # 2. Pure Python Emulation for common Unix utilities (cat, touch, pwd, clear, ls, which)
+        # Guarantees instant, platform-independent execution without Windows cmd.exe failures!
+        tokens = None
+        if not any(sep in raw_cmd for sep in ("|", ">", "<", "&&", "||", ";", "`", "$(")):
+            try:
+                tokens = shlex.split(raw_cmd, posix=False)
+            except Exception:
+                tokens = None
+
+        if tokens and len(tokens) > 0:
+            base_cmd = tokens[0].lower()
+
+            # Emulate 'cat'
+            if base_cmd == "cat":
+                args = tokens[1:]
+                show_line_numbers = False
+                if args and args[0] in ("-n", "--number"):
+                    show_line_numbers = True
+                    args = args[1:]
+
+                if not args:
+                    return {"CommandLine": cmd, "command": cmd, "stdout": "", "stderr": "cat: missing file operand", "exit_code": 1}
+
+                combined_out = []
+                for file_arg in args:
+                    clean_file = file_arg.strip('\'"')
+                    target = (Path(exec_dir) / clean_file).resolve()
+                    if not target.is_file():
+                        cands = list(Path(exec_dir).glob(f"**/{Path(clean_file).name}"))
+                        if cands:
+                            target = cands[0]
+                        else:
+                            return {
+                                "CommandLine": cmd,
+                                "command": cmd,
+                                "stdout": "\n".join(combined_out),
+                                "stderr": f"cat: {clean_file}: No such file or directory",
+                                "exit_code": 1
+                            }
+                    try:
+                        with open(target, 'r', encoding='utf-8', errors='replace') as fh:
+                            content = fh.read()
+                            if show_line_numbers:
+                                lines = content.splitlines()
+                                content = "\n".join(f"{idx + 1:6d}  {line}" for idx, line in enumerate(lines))
+                            combined_out.append(content)
+                    except Exception as e:
+                        return {
+                            "CommandLine": cmd,
+                            "command": cmd,
+                            "stdout": "\n".join(combined_out),
+                            "stderr": f"cat: {clean_file}: {str(e)}",
+                            "exit_code": 1
+                        }
+                return {
+                    "CommandLine": cmd,
+                    "command": cmd,
+                    "stdout": "\n".join(combined_out),
+                    "stderr": "",
+                    "exit_code": 0
+                }
+
+            # Emulate 'touch'
+            elif base_cmd == "touch":
+                files_to_touch = tokens[1:]
+                if not files_to_touch:
+                    return {"CommandLine": cmd, "command": cmd, "stdout": "", "stderr": "touch: missing file operand", "exit_code": 1}
+                for f in files_to_touch:
+                    clean_f = f.strip('\'"')
+                    target = (Path(exec_dir) / clean_f).resolve()
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.touch(exist_ok=True)
+                return {"CommandLine": cmd, "command": cmd, "stdout": "", "stderr": "", "exit_code": 0}
+
+            # Emulate 'pwd'
+            elif base_cmd == "pwd":
+                return {"CommandLine": cmd, "command": cmd, "stdout": str(exec_dir) + "\n", "stderr": "", "exit_code": 0}
+
+            # Emulate 'clear' or 'cls'
+            elif base_cmd in ("clear", "cls"):
+                return {"CommandLine": cmd, "command": cmd, "stdout": "", "stderr": "", "exit_code": 0}
+
+            # Emulate 'which'
+            elif base_cmd == "which":
+                target_prog = tokens[1].strip('\'"') if len(tokens) > 1 else ""
+                if not target_prog:
+                    return {"CommandLine": cmd, "command": cmd, "stdout": "", "stderr": "which: missing program name", "exit_code": 1}
+                loc = shutil.which(target_prog)
+                if loc:
+                    return {"CommandLine": cmd, "command": cmd, "stdout": loc + "\n", "stderr": "", "exit_code": 0}
+                return {"CommandLine": cmd, "command": cmd, "stdout": "", "stderr": f"{target_prog} not found in PATH", "exit_code": 1}
+
+            # Emulate simple 'ls'
+            elif base_cmd == "ls" and (len(tokens) == 1 or tokens[1] in ("-a", "-la", "-l", "-lh", "-al")):
+                show_details = len(tokens) > 1 and ("l" in tokens[1])
+                target_dir = Path(exec_dir)
+                try:
+                    entries = sorted(list(target_dir.iterdir()), key=lambda p: (not p.is_dir(), p.name.lower()))
+                    lines = []
+                    for e in entries:
+                        if e.name.startswith(".") and (len(tokens) == 1 or "a" not in tokens[1]):
+                            continue
+                        if show_details:
+                            sz = e.stat().st_size if e.is_file() else 0
+                            mtime = time.strftime('%b %d %H:%M', time.localtime(e.stat().st_mtime))
+                            prefix = "drwxr-xr-x" if e.is_dir() else "-rw-r--r--"
+                            lines.append(f"{prefix}  1 user staff  {sz:8d}  {mtime}  {e.name}{'/' if e.is_dir() else ''}")
+                        else:
+                            lines.append(f"{e.name}{'/' if e.is_dir() else ''}")
+                    return {
+                        "CommandLine": cmd,
+                        "command": cmd,
+                        "stdout": "\n".join(lines) + ("\n" if lines else ""),
+                        "stderr": "",
+                        "exit_code": 0
+                    }
+                except Exception as e:
+                    return {"CommandLine": cmd, "command": cmd, "stdout": "", "stderr": str(e), "exit_code": 1}
+
+        # 3. Prepare Shell Command Execution
+        executable_cmd = raw_cmd
+        if executable_cmd.startswith("python "):
+            executable_cmd = f'"{sys.executable}" ' + executable_cmd[7:]
+        elif executable_cmd == "python":
+            executable_cmd = f'"{sys.executable}"'
+        elif executable_cmd.startswith("pip "):
+            executable_cmd = f'"{sys.executable}" -m pip ' + executable_cmd[4:]
+        elif executable_cmd == "pip":
+            executable_cmd = f'"{sys.executable}" -m pip'
+
+        # On Windows, execute through powershell.exe so that built-in aliases (cat, ls, rm, cp, mv, curl, wget, pwd, clear)
+        # and shell pipelines work naturally without "is not recognized" errors!
+        use_powershell = sys.platform == "win32" and shutil.which("powershell")
+        if use_powershell:
+            shell_args = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", executable_cmd]
+            shell_mode = False
+        else:
+            shell_args = executable_cmd
+            shell_mode = True
+
+        def run_proc(args, use_shell):
+            p = subprocess.Popen(
+                args,
+                shell=use_shell,
+                cwd=str(exec_dir),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
                 encoding='utf-8',
-                errors='replace'
+                errors='replace',
+                env=os.environ.copy()
             )
-            stdout, stderr = proc.communicate(timeout=90)
-            self.send_json(200, {
-                "command": cmd,
-                "stdout": stdout,
-                "stderr": stderr,
-                "exit_code": proc.returncode
-            })
+            out, err = p.communicate(timeout=timeout)
+            return out, err, p.returncode
+
+        try:
+            stdout, stderr, exit_code = run_proc(shell_args, shell_mode)
         except subprocess.TimeoutExpired:
-            proc.kill()
-            self.send_json(200, {
+            return {
+                "CommandLine": cmd,
                 "command": cmd,
                 "stdout": "",
-                "stderr": "Execution timed out after 90 seconds",
+                "stderr": f"Execution timed out after {timeout} seconds",
                 "exit_code": -1
-            })
+            }
         except Exception as e:
-            self.send_json(500, {"error": str(e), "stdout": "", "stderr": str(e), "exit_code": 1})
+            return {
+                "CommandLine": cmd,
+                "command": cmd,
+                "stdout": "",
+                "stderr": str(e),
+                "exit_code": 1
+            }
+
+        # 4. Auto-heal / Auto-download required dependencies
+        if exit_code != 0 and stderr:
+            # Check A: Missing Python module
+            py_match = re.search(r"(?:ModuleNotFoundError|ImportError):\s+No module named ['\"]([^'\"]+)['\"]", stderr)
+            if py_match:
+                missing_mod = py_match.group(1).split('.')[0]
+                install_cmd = [sys.executable, "-m", "pip", "install", missing_mod]
+                try:
+                    inst_proc = subprocess.run(install_cmd, capture_output=True, text=True, timeout=90, cwd=str(exec_dir))
+                    if inst_proc.returncode == 0:
+                        stdout_r, stderr_r, exit_code_r = run_proc(shell_args, shell_mode)
+                        return {
+                            "CommandLine": cmd,
+                            "command": cmd,
+                            "stdout": f"[frAIday Auto-Installer] ✔ Automatically downloaded & installed Python module '{missing_mod}'.\n\n" + stdout_r,
+                            "stderr": stderr_r,
+                            "exit_code": exit_code_r
+                        }
+                except Exception as ex:
+                    stderr += f"\n[frAIday Auto-Installer] Attempted to auto-install '{missing_mod}' but encountered: {ex}"
+
+            # Check B: Missing Node.js module
+            node_match = re.search(r"Cannot find module ['\"]([^'\"]+)['\"]", stderr)
+            if node_match:
+                missing_pkg = node_match.group(1)
+                if not missing_pkg.startswith((".", "/", "\\")):
+                    install_cmd = f"npm install {missing_pkg}"
+                    try:
+                        inst_proc = subprocess.run(install_cmd, shell=True, capture_output=True, text=True, timeout=90, cwd=str(exec_dir))
+                        if inst_proc.returncode == 0:
+                            stdout_r, stderr_r, exit_code_r = run_proc(shell_args, shell_mode)
+                            return {
+                                "CommandLine": cmd,
+                                "command": cmd,
+                                "stdout": f"[frAIday Auto-Installer] ✔ Automatically downloaded & installed Node.js package '{missing_pkg}'.\n\n" + stdout_r,
+                                "stderr": stderr_r,
+                                "exit_code": exit_code_r
+                            }
+                    except Exception as ex:
+                        stderr += f"\n[frAIday Auto-Installer] Attempted to auto-install '{missing_pkg}' but encountered: {ex}"
+
+            # Check C: Command not found in cmd.exe (e.g. npm CLI tools like vite, http-server, serve, tsc)
+            cmd_match = re.search(r"['\"]?([a-zA-Z0-9_\-]+)['\"]? is not recognized as an internal or external command", stderr)
+            if cmd_match:
+                missing_bin = cmd_match.group(1).lower()
+                if shutil.which("npx"):
+                    npx_cmd = f"npx --yes {executable_cmd}"
+                    try:
+                        npx_args = ["powershell", "-NoProfile", "-Command", npx_cmd] if use_powershell else npx_cmd
+                        stdout_r, stderr_r, exit_code_r = run_proc(npx_args, not use_powershell)
+                        if exit_code_r == 0 or stdout_r:
+                            return {
+                                "CommandLine": cmd,
+                                "command": cmd,
+                                "stdout": f"[frAIday Auto-Installer] ✔ Automatically ran '{missing_bin}' via npx.\n\n" + stdout_r,
+                                "stderr": stderr_r,
+                                "exit_code": exit_code_r
+                            }
+                    except Exception:
+                        pass
+
+        # Advisory for browser DOM APIs in Node.js
+        if stderr and ("ReferenceError: document is not defined" in stderr or "document is not def" in stderr or "ReferenceError: window is not defined" in stderr):
+            stderr += "\n\n[SYSTEM ADVISORY]: You attempted to execute a client-side browser JavaScript script containing DOM APIs ('document' or 'window') using Node.js in the terminal. Node.js does not have browser DOM globals. Browser frontends run in the client browser, NOT in Node CLI. To test and audit browser client-side applications, ensure index.html loads the script and use the 'browser_subagent' tool to launch headless Chrome and inspect the live preview."
+
+        return {
+            "CommandLine": cmd,
+            "command": cmd,
+            "stdout": stdout,
+            "stderr": stderr,
+            "exit_code": exit_code
+        }
 
     def handle_web_search(self, query):
         if not query:
@@ -590,19 +825,20 @@ class FrAIdayHandler(http.server.SimpleHTTPRequestHandler):
             elif groq_model in ("qwen-3.8-27b", "qwen3.8-27b"):
                 groq_model = "qwen/qwen3.8-27b"
 
-            # Formulate fallback cascade: try requested first, then fall back to 20b and qwen
+            # Formulate fallback cascade: prioritize higher-quota models first
             candidates = [groq_model]
-            for fb in ["openai/gpt-oss-20b", "qwen/qwen3.8-27b"]:
+            for fb in ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]:
                 if fb not in candidates:
                     candidates.append(fb)
 
             headers = {
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) frAIday/1.0"
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
             }
 
             last_error = None
+            wait_sec = 3.0
             for current_model in candidates:
                 payload = {
                     "model": current_model,
@@ -637,7 +873,10 @@ class FrAIdayHandler(http.server.SimpleHTTPRequestHandler):
                 except urllib.error.HTTPError as e:
                     err_text = e.read().decode('utf-8', errors='replace')
                     last_error = f"HTTP {e.code}: {err_text}"
-                    if e.code == 429:
+                    if e.code == 413 or "too large" in err_text.lower():
+                        print(f"[frAIday Server] {current_model} HTTP 413 request size limit exceeded. Auto-falling back to next model...", flush=True)
+                        continue
+                    elif e.code == 429:
                         wait_sec = 2.5
                         try:
                             # Support formats like "32m47.328s" or "2.5s" or "1m30s"
@@ -649,10 +888,10 @@ class FrAIdayHandler(http.server.SimpleHTTPRequestHandler):
                         except Exception:
                             pass
 
-                        # If wait is short (<= 5s) and not a daily quota lockout, sleep and retry once
-                        is_daily_exhaustion = "tokens per day" in err_text or "TPD" in err_text or wait_sec > 8.0
-                        if not is_daily_exhaustion and wait_sec <= 5.0:
-                            print(f"[frAIday Server] Groq 429 rate limit on {current_model}. Backing off {wait_sec:.2f}s and retrying...")
+                        # If wait is short (<= 20s) and not a daily quota lockout, sleep and retry once
+                        is_daily_exhaustion = "tokens per day" in err_text or "TPD" in err_text or wait_sec > 25.0
+                        if not is_daily_exhaustion and wait_sec <= 20.0:
+                            print(f"[frAIday Server] Groq 429 rate limit on {current_model}. Backing off {wait_sec:.2f}s and retrying...", flush=True)
                             time.sleep(wait_sec)
                             try:
                                 req_retry = urllib.request.Request(url, data=req_data, headers=headers)
@@ -673,20 +912,21 @@ class FrAIdayHandler(http.server.SimpleHTTPRequestHandler):
                                     })
                                     return
                             except Exception as retry_err:
-                                print(f"[frAIday Server] Retry on {current_model} failed: {retry_err}")
+                                print(f"[frAIday Server] Retry on {current_model} failed: {retry_err}", flush=True)
 
                         # If wait is long or daily limit is hit, seamlessly switch to next candidate
-                        print(f"[frAIday Server] {current_model} 429 quota/rate limit hit ({wait_sec:.1f}s wait). Auto-falling back to next available model in cascade...")
+                        print(f"[frAIday Server] {current_model} 429 quota/rate limit hit ({wait_sec:.1f}s wait). Auto-falling back to next available model in cascade...", flush=True)
                         continue
                     else:
-                        print(f"[frAIday Server] Error calling {current_model}: {last_error}")
+                        print(f"[frAIday Server] Error calling {current_model}: {last_error}", flush=True)
                         continue
                 except Exception as e:
                     last_error = str(e)
                     continue
 
             self.send_json(429 if "429" in str(last_error) else 500, {
-                "error": f"Groq Gateway Error: {last_error}"
+                "error": f"Groq Gateway Error: {last_error}",
+                "retry_after": wait_sec
             })
             return
 
@@ -987,56 +1227,7 @@ class FrAIdayHandler(http.server.SimpleHTTPRequestHandler):
         self.send_json(400, {"error": f"Unknown tool: {name}"})
 
     def execute_shell_command(self, cmd, exec_dir):
-        if not cmd:
-            return {"CommandLine": "", "stdout": "", "stderr": "No command provided", "exit_code": 1}
-        dangerous = ["rm -rf /", "mkfs", ":(){ :|:& };:"]
-        for d in dangerous:
-            if d in cmd:
-                return {"CommandLine": cmd, "stdout": "", "stderr": f"Blocked by safety policy: {cmd}", "exit_code": 1}
-
-        executable_cmd = cmd
-        if executable_cmd.startswith("python "):
-            executable_cmd = f'"{sys.executable}" ' + executable_cmd[7:]
-        elif executable_cmd.startswith("pip "):
-            executable_cmd = f'"{sys.executable}" -m pip ' + executable_cmd[4:]
-        elif executable_cmd == "python":
-            executable_cmd = f'"{sys.executable}"'
-
-        try:
-            proc = subprocess.Popen(
-                executable_cmd,
-                shell=True,
-                cwd=str(exec_dir),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                encoding='utf-8',
-                errors='replace'
-            )
-            stdout, stderr = proc.communicate(timeout=90)
-            if stderr and ("ReferenceError: document is not defined" in stderr or "document is not def" in stderr or "ReferenceError: window is not defined" in stderr):
-                stderr += "\n\n[SYSTEM ADVISORY]: You attempted to execute a client-side browser JavaScript script containing DOM APIs ('document' or 'window') using Node.js in the terminal. Node.js does not have browser DOM globals. Browser frontends run in the client browser, NOT in Node CLI. To test and audit browser client-side applications, ensure index.html loads the script and use the 'browser_subagent' tool to launch headless Chrome and inspect the live preview."
-            return {
-                "CommandLine": cmd,
-                "stdout": stdout,
-                "stderr": stderr,
-                "exit_code": proc.returncode
-            }
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            return {
-                "CommandLine": cmd,
-                "stdout": "",
-                "stderr": "Command execution timed out after 90 seconds.",
-                "exit_code": -1
-            }
-        except Exception as e:
-            return {
-                "CommandLine": cmd,
-                "stdout": "",
-                "stderr": str(e),
-                "exit_code": 1
-            }
+        return self.run_workspace_command(cmd, exec_dir=exec_dir)
 
     def execute_write_file(self, target_file, code_content, overwrite=True, description=""):
         if not target_file:
@@ -1053,16 +1244,20 @@ class FrAIdayHandler(http.server.SimpleHTTPRequestHandler):
         if target.is_file() and not overwrite:
             return {"success": False, "error": f"File {clean} already exists and overwrite=False"}
 
+        already_existed = target.is_file()
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
             with open(target, 'w', encoding='utf-8') as f:
                 f.write(code_content)
-            return {
+            res = {
                 "success": True,
                 "TargetFile": clean,
                 "sizeBytes": len(code_content.encode('utf-8')),
                 "description": description or f"Wrote {clean}"
             }
+            if already_existed and target.name not in ("implementation_plan.md", "walkthrough.md"):
+                res["advisory"] = f"File '{clean}' already existed and was overwritten completely. For surgical updates or bug fixes, always prefer 'replace_file_content' to prevent accidental code loss."
+            return res
         except Exception as e:
             return {"success": False, "error": str(e)}
 

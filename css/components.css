@@ -342,6 +342,49 @@
   border: 1px solid rgba(255, 255, 255, 0.04);
 }
 
+.tool-intent-box {
+  background: rgba(7, 10, 15, 0.85);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-size: 11.5px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.tool-intent-box .intent-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.tool-intent-box .intent-label {
+  font-weight: 700;
+  font-size: 11px;
+}
+
+.tool-intent-box .intent-value {
+  color: #f1f5f9;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  word-break: break-all;
+}
+
+.tool-intent-box .intent-desc {
+  color: #94a3b8;
+  font-size: 10.5px;
+  margin-top: 3px;
+  line-height: 1.4;
+}
+
+.tool-result-box {
+  background: rgba(11, 16, 26, 0.95);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
 /* Human-in-the-Loop Interceptor Alert Box */
 .hitl-alert-card {
   background: linear-gradient(135deg, rgba(30, 20, 10, 0.95), rgba(45, 26, 10, 0.95));
@@ -712,4 +755,21 @@
   background: #b91c1c !important;
   border-color: #f87171 !important;
   box-shadow: 0 0 12px rgba(239, 68, 68, 0.4);
+}
+
+/* Execution Halted Alert Cards */
+.chat-halted-row .chat-bubble-agent {
+  animation: haltedFadeIn 0.25s ease-out;
+  border-width: 1.5px;
+}
+
+@keyframes haltedFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

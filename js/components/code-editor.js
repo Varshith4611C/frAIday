@@ -126,37 +126,24 @@ export class CodeEditorComponent {
           </div>
         </div>
 
+        <!-- Antigravity Inline Code Lenses Sub-toolbar -->
+        <div class="editor-lenses-bar">
+          <span class="lenses-label">✨ Lenses:</span>
+          <button class="lens-action-btn" data-action="refactor">✨ Refactor</button>
+          <button class="lens-action-btn test" data-action="test">🧪 Generate Tests</button>
+          <button class="lens-action-btn explain" data-action="explain">🔍 Explain Code</button>
+          <button class="lens-action-btn" data-action="audit" style="color:#fbbf24;border-color:rgba(245,158,11,0.3);background:rgba(245,158,11,0.1);">🛡️ Security Audit</button>
+        </div>
+
         <div class="editor-viewport">
-          <div class="editor-gutter">
+          <div class="editor-gutter" id="editor-gutter-lines">
             ${gutterLines}
           </div>
-          <div class="editor-content" id="editor-code-body" style="position:relative;">
-            <!-- Antigravity Inline Code Lenses -->
-            <div class="code-lens-row">
-              <button class="lens-action-btn" data-action="refactor">✨ Refactor</button>
-              <button class="lens-action-btn test" data-action="test">🧪 Generate Tests</button>
-              <button class="lens-action-btn explain" data-action="explain">🔍 Explain Code</button>
-              <button class="lens-action-btn" data-action="audit" style="color:#fbbf24;border-color:rgba(245,158,11,0.3);background:rgba(245,158,11,0.1);">🛡️ Security Audit</button>
-            </div>
-
+          <div class="editor-content" id="editor-code-body">
             ${this.viewMode === 'diff' && this.currentDiff ? `
-              <div class="code-text-area">${highlightCode(this.currentDiff, 'diff')}</div>
+              <div class="code-text-area" id="editor-diff-content">${highlightCode(this.currentDiff, 'diff')}</div>
             ` : `
-              <textarea id="editor-textarea" spellcheck="false" style="
-                width: 100%;
-                height: calc(100% - 30px);
-                background: transparent;
-                border: none;
-                color: #e6edf3;
-                font-family: var(--font-mono);
-                font-size: 12.5px;
-                line-height: 20.625px;
-                resize: none;
-                outline: none;
-                white-space: pre;
-                overflow-wrap: normal;
-                overflow-x: auto;
-              ">${escapeHtml(this.currentContent)}</textarea>
+              <textarea id="editor-textarea" spellcheck="false" wrap="off">${escapeHtml(this.currentContent)}</textarea>
             `}
           </div>
         </div>
@@ -180,15 +167,43 @@ export class CodeEditorComponent {
     }
 
     const textarea = this.container.querySelector('#editor-textarea');
-    if (textarea) {
-      textarea.addEventListener('input', () => {
+    const gutter = this.container.querySelector('#editor-gutter-lines');
+
+    if (textarea && gutter) {
+      // Synchronize vertical scrolling with line numbers
+      textarea.addEventListener('scroll', () => {
+        gutter.scrollTop = textarea.scrollTop;
+      });
+
+      // Forward wheel scrolling on the line numbers gutter to the textarea
+      gutter.addEventListener('wheel', (e) => {
+        textarea.scrollTop += e.deltaY;
+        e.preventDefault();
+      }, { passive: false });
+
+      // Dynamically update gutter line numbers on input
+      const updateGutter = () => {
         this.currentContent = textarea.value;
         this.isDirty = true;
-      });
+        const lineCount = (textarea.value.match(/\n/g) || []).length + 1;
+        gutter.innerHTML = Array.from({ length: Math.max(lineCount, 1) }, (_, i) => `<div class="gutter-line">${i + 1}</div>`).join('');
+        gutter.scrollTop = textarea.scrollTop;
+      };
+
+      textarea.addEventListener('input', updateGutter);
+
+      // Support Tab key indentation without losing focus or breaking scroll
       textarea.addEventListener('keydown', (e) => {
         if ((e.ctrlKey || e.metaKey) && e.key === 's') {
           e.preventDefault();
           this.saveCurrentFile();
+        } else if (e.key === 'Tab') {
+          e.preventDefault();
+          const start = textarea.selectionStart;
+          const end = textarea.selectionEnd;
+          textarea.value = textarea.value.substring(0, start) + '  ' + textarea.value.substring(end);
+          textarea.selectionStart = textarea.selectionEnd = start + 2;
+          updateGutter();
         }
       });
     }
@@ -196,7 +211,8 @@ export class CodeEditorComponent {
     const copyBtn = this.container.querySelector('#btn-copy-code');
     if (copyBtn) {
       copyBtn.addEventListener('click', () => {
-        navigator.clipboard.writeText(this.currentContent);
+        const textToCopy = textarea ? textarea.value : this.currentContent;
+        navigator.clipboard.writeText(textToCopy);
         copyBtn.innerText = '✅ Copied!';
         setTimeout(() => { copyBtn.innerText = '📋 Copy'; }, 2000);
       });
@@ -206,7 +222,8 @@ export class CodeEditorComponent {
       btn.addEventListener('click', () => {
         const action = btn.getAttribute('data-action');
         if (this.onTriggerLens) {
-          this.onTriggerLens(action, this.currentFile, this.currentContent);
+          const currentVal = textarea ? textarea.value : this.currentContent;
+          this.onTriggerLens(action, this.currentFile, currentVal);
         }
       });
     });

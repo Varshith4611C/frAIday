@@ -92,7 +92,7 @@ class AppCoordinator {
     const kiEl = document.getElementById('knowledge-vault-container');
     const hitlEl = document.getElementById('hitl-interceptor-slot');
     const monologueEl = document.getElementById('agent-monologue-card');
-    const streamContainer = document.getElementById('tool-stream-list');
+    const streamContainer = document.getElementById('chat-timeline');
     const statusPillEl = document.getElementById('status-pill');
 
     this.fileTree = new FileTreeComponent(fileTreeEl, (path) => {
@@ -158,8 +158,11 @@ class AppCoordinator {
       onExecutionStart: () => {
         this.setExecutionUiRunning(true);
       },
-      onExecutionEnd: () => {
+      onExecutionEnd: (status = {}) => {
         this.setExecutionUiRunning(false);
+        if (status && (status.error || status.aborted)) {
+          this.renderHaltedCardInChat(status);
+        }
       }
     });
 
@@ -187,6 +190,23 @@ class AppCoordinator {
     document.querySelectorAll('.canvas-view').forEach(view => {
       view.classList.toggle('active', view.getAttribute('data-view') === tabKey);
     });
+
+    if (tabKey === 'terminal') {
+      const termInput = document.getElementById('term-user-input');
+      if (termInput) {
+        setTimeout(() => termInput.focus(), 50);
+      }
+    }
+
+    if (tabKey === 'code') {
+      if (!this.codeEditor.currentFile) {
+        // Automatically open index.html or first file if nothing loaded
+        const defaultFile = (this.fileTree?.files || []).find(f => f.path === 'index.html' || f.path === 'app.js')?.path
+          || (this.fileTree?.files && this.fileTree.files[0]?.path)
+          || 'index.html';
+        this.codeEditor.loadFile(defaultFile);
+      }
+    }
   }
 
   bindCanvasTabs() {
@@ -196,6 +216,47 @@ class AppCoordinator {
         this.switchTab(tabKey);
       });
     });
+
+    // Global shortcut Ctrl+` or Cmd+` to toggle terminal
+    window.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === '`') {
+        e.preventDefault();
+        this.switchTab(this.activeTab === 'terminal' ? 'preview' : 'terminal');
+      }
+    });
+  }
+
+  bindActivityBar() {
+    document.querySelectorAll('.activity-btn[data-panel]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.activity-btn[data-panel]').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+
+        const panelKey = btn.getAttribute('data-panel');
+        document.querySelectorAll('.sidebar-panel-content').forEach(p => {
+          p.style.display = p.getAttribute('data-panel') === panelKey ? 'block' : 'none';
+        });
+
+        const titleEl = document.getElementById('sidebar-panel-title');
+        if (titleEl) {
+          const titles = {
+            files: 'Workspace Explorer',
+            knowledge: 'Discovered Docs & RFCs',
+            skills: 'MCP Tooling & Skills',
+            safety: 'Execution Policies'
+          };
+          titleEl.innerText = titles[panelKey] || 'Panel';
+        }
+      });
+    });
+
+    // Activity bar terminal button
+    const termActivityBtn = document.getElementById('activity-btn-terminal');
+    if (termActivityBtn) {
+      termActivityBtn.addEventListener('click', () => {
+        this.switchTab('terminal');
+      });
+    }
   }
 
   bindPreviewControls() {
@@ -378,9 +439,17 @@ class AppCoordinator {
     if (stopBtn) {
       stopBtn.addEventListener('click', () => {
         if (this.agentEngine) {
-          this.agentEngine.abort();
+          this.agentEngine.abort('Execution manually stopped by user via HUD Stop button.');
         }
         this.setExecutionUiRunning(false);
+      });
+    }
+
+    // HUD Terminal Toggle Button
+    const hudTermBtn = document.getElementById('btn-toggle-terminal-hud');
+    if (hudTermBtn) {
+      hudTermBtn.addEventListener('click', () => {
+        this.switchTab(this.activeTab === 'terminal' ? 'preview' : 'terminal');
       });
     }
 
@@ -473,7 +542,7 @@ class AppCoordinator {
 
           const chatTimeline = document.getElementById('chat-timeline');
           if (chatTimeline) {
-            chatTimeline.querySelectorAll('.chat-msg-row').forEach(el => el.remove());
+            chatTimeline.querySelectorAll('.chat-msg-row, .tool-card').forEach(el => el.remove());
           }
 
           this.setExecutionUiRunning(false);
@@ -901,8 +970,29 @@ class AppCoordinator {
     // 3. Update frontend UI badges in HUD and Cockpit immediately
     this.updateModelDisplay(provider, model);
 
+    // 4. CLEAR ANY EXISTING ERROR / HALTED CARDS IN TIMELINE
+    const chatTimeline = document.getElementById('chat-timeline');
+    const hadHaltCard = Boolean(chatTimeline && chatTimeline.querySelector('.chat-halted-row'));
+    if (chatTimeline) {
+      chatTimeline.querySelectorAll('.chat-halted-row').forEach(el => el.remove());
+    }
+
+    // 5. Reset agent state to idle/ready if it was in error
+    if (this.agentEngine && this.agentEngine.state === 'error') {
+      this.agentEngine.setState('idle', 'Ready');
+    }
+
+    // 6. Update reasoning monologue box
+    const monologueCard = document.getElementById('agent-monologue-card');
+    if (monologueCard) {
+      const body = monologueCard.querySelector('.monologue-text') || monologueCard;
+      if (body) {
+        body.innerHTML = `<span style="color:#34d399;font-weight:600;">✔ AI Settings Updated:</span> Connected to <strong>${provider.toUpperCase()}</strong> (<code>${model}</code>). Previous halts cleared and ready for execution.`;
+      }
+    }
+
     try {
-      // 4. Sync to backend server via POST /api/config
+      // 7. Sync to backend server via POST /api/config
       const resp = await fetch('/api/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -925,6 +1015,11 @@ class AppCoordinator {
           saveBtn.innerText = 'Save Configuration';
         }
         this.closeSettingsModal();
+
+        // 8. If an active goal was interrupted by the previous halt, render a prominent resume card
+        if (hadHaltCard && this.agentEngine && this.agentEngine.currentGoal && chatTimeline) {
+          this.renderResumePromptInChat(this.agentEngine.currentGoal, provider, model);
+        }
       }, 350);
     } catch (err) {
       console.warn('Backend sync warning:', err);
@@ -938,7 +1033,67 @@ class AppCoordinator {
           saveBtn.innerText = 'Save Configuration';
         }
         this.closeSettingsModal();
+
+        if (hadHaltCard && this.agentEngine && this.agentEngine.currentGoal && chatTimeline) {
+          this.renderResumePromptInChat(this.agentEngine.currentGoal, provider, model);
+        }
       }, 400);
+    }
+  }
+
+  renderResumePromptInChat(goal, provider, model) {
+    const chatTimeline = document.getElementById('chat-timeline');
+    if (!chatTimeline) return;
+
+    const row = document.createElement('div');
+    row.className = 'chat-msg-row chat-agent-row';
+    row.style.display = 'flex';
+    row.style.flexDirection = 'column';
+    row.style.gap = '6px';
+    row.style.marginBottom = '12px';
+
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    row.innerHTML = `
+      <div class="chat-sender-row">
+        <span class="chat-sender-avatar">⚡</span>
+        <span class="chat-sender-name">frAIday System</span>
+        <span class="chat-sender-badge" style="background:rgba(16,185,129,0.2);color:#34d399;border:1px solid rgba(16,185,129,0.4);">Configuration Applied</span>
+        <span class="chat-time">${timeStr}</span>
+      </div>
+      <div class="chat-bubble-agent" style="border-color:rgba(16,185,129,0.4);background:rgba(6,25,18,0.95);color:#f1f5f9;">
+        <div style="font-weight:700;color:#34d399;margin-bottom:4px;display:flex;align-items:center;gap:6px;">
+          <span>✔ API Key Successfully Updated</span>
+        </div>
+        <div style="font-size:12px;color:#cbd5e1;margin-bottom:8px;">
+          Connected to <strong>${provider.toUpperCase()}</strong> (${model}). The previous rate limit halt has been cleared. Click below to resume your mission where it left off:
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button id="btn-resume-after-settings" class="btn btn-primary btn-sm" style="background:#10b981;border-color:#10b981;font-weight:700;font-size:11.5px;padding:6px 14px;">
+            ▶ Resume Mission: "${this.escapeInlineMd(goal)}"
+          </button>
+        </div>
+      </div>
+    `;
+
+    chatTimeline.appendChild(row);
+
+    const resumeBtn = row.querySelector('#btn-resume-after-settings');
+    if (resumeBtn) {
+      resumeBtn.addEventListener('click', () => {
+        row.remove();
+        if (this.agentEngine && typeof this.agentEngine.resumeGoal === 'function') {
+          this.agentEngine.resumeGoal();
+        } else if (this.agentEngine && this.agentEngine.currentGoal) {
+          this.agentEngine.executeGoal(this.agentEngine.currentGoal);
+        }
+      });
+    }
+
+    const cockpitScroll = document.getElementById('cockpit-scroll-area');
+    if (cockpitScroll) {
+      cockpitScroll.scrollTop = cockpitScroll.scrollHeight;
     }
   }
 
@@ -995,7 +1150,7 @@ class AppCoordinator {
     if (stopContextBtn) {
       stopContextBtn.addEventListener('click', () => {
         if (this.agentEngine) {
-          this.agentEngine.abort();
+          this.agentEngine.abort('Execution manually stopped by user via Prompt Bar Stop button.');
         }
         this.setExecutionUiRunning(false);
       });
@@ -1048,12 +1203,7 @@ class AppCoordinator {
       <div class="chat-bubble-user">${this.escapeInlineMd(text)}</div>
     `;
 
-    const toolStreamList = document.getElementById('tool-stream-list');
-    if (toolStreamList && toolStreamList.parentNode === chatTimeline) {
-      chatTimeline.insertBefore(row, toolStreamList);
-    } else {
-      chatTimeline.appendChild(row);
-    }
+    chatTimeline.appendChild(row);
 
     const cockpitScroll = document.getElementById('cockpit-scroll-area');
     if (cockpitScroll) {
@@ -1085,12 +1235,7 @@ class AppCoordinator {
       <div class="chat-bubble-agent">${this.escapeInlineMd(markdown)}</div>
     `;
 
-    const toolStreamList = document.getElementById('tool-stream-list');
-    if (toolStreamList && toolStreamList.parentNode === chatTimeline) {
-      chatTimeline.insertBefore(row, toolStreamList);
-    } else {
-      chatTimeline.appendChild(row);
-    }
+    chatTimeline.appendChild(row);
 
     const cockpitScroll = document.getElementById('cockpit-scroll-area');
     if (cockpitScroll) {
@@ -1142,12 +1287,7 @@ class AppCoordinator {
       </div>
     `;
 
-    const toolStreamList = document.getElementById('tool-stream-list');
-    if (toolStreamList && toolStreamList.parentNode === chatTimeline) {
-      chatTimeline.insertBefore(row, toolStreamList);
-    } else {
-      chatTimeline.appendChild(row);
-    }
+    chatTimeline.appendChild(row);
 
     const approveBtn = row.querySelector('#btn-chat-approve-plan');
     const reviseBtn = row.querySelector('#btn-chat-revise-plan');
@@ -1212,12 +1352,7 @@ class AppCoordinator {
       </div>
     `;
 
-    const toolStreamList = document.getElementById('tool-stream-list');
-    if (toolStreamList && toolStreamList.parentNode === chatTimeline) {
-      chatTimeline.insertBefore(row, toolStreamList);
-    } else {
-      chatTimeline.appendChild(row);
-    }
+    chatTimeline.appendChild(row);
 
     const cockpitScroll = document.getElementById('cockpit-scroll-area');
     if (cockpitScroll) {
@@ -1268,11 +1403,168 @@ class AppCoordinator {
       </div>
     `;
 
-    const toolStreamList = document.getElementById('tool-stream-list');
-    if (toolStreamList && toolStreamList.parentNode === chatTimeline) {
-      chatTimeline.insertBefore(row, toolStreamList);
+    chatTimeline.appendChild(row);
+
+    const cockpitScroll = document.getElementById('cockpit-scroll-area');
+    if (cockpitScroll) {
+      cockpitScroll.scrollTop = cockpitScroll.scrollHeight;
+    }
+  }
+
+  renderHaltedCardInChat(haltData) {
+    const chatTimeline = document.getElementById('chat-timeline');
+    if (!chatTimeline || !haltData) return;
+
+    const row = document.createElement('div');
+    row.className = 'chat-msg-row chat-halted-row';
+    row.style.display = 'flex';
+    row.style.flexDirection = 'column';
+    row.style.gap = '6px';
+    row.style.marginBottom = '12px';
+
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    const isAborted = Boolean(haltData.aborted);
+    const rawError = (haltData.error || haltData.reason || '').toLowerCase();
+    const isRateLimit = rawError.includes('429') || rawError.includes('rate limit') || rawError.includes('quota') || rawError.includes('tpd');
+    const isAuth = rawError.includes('401') || rawError.includes('api key') || rawError.includes('unauthorized');
+    const isTurnLimit = rawError.includes('turn limit') || rawError.includes('steps');
+
+    let title = '🛑 Execution Halted';
+    let badge = 'Halted';
+    let icon = '🛑';
+    let borderColor = 'rgba(239, 68, 68, 0.4)';
+    let bgColor = 'rgba(30, 15, 20, 0.95)';
+    let titleColor = '#f87171';
+    let actionButtons = '';
+
+    if (isAborted) {
+      icon = '⏹';
+      title = 'Execution Stopped by User';
+      badge = 'Stopped';
+      borderColor = 'rgba(245, 158, 11, 0.4)';
+      bgColor = 'rgba(28, 20, 12, 0.95)';
+      titleColor = '#fbbf24';
+      actionButtons = `
+        <button id="btn-halt-resume" class="btn btn-primary btn-sm" style="background:#10b981;border-color:#10b981;font-size:11.5px;padding:5px 12px;font-weight:700;">
+          ▶ Resume Objective
+        </button>
+      `;
+    } else if (isRateLimit) {
+      icon = '⏳';
+      title = 'Execution Halted: API Rate Limit / Quota Exceeded';
+      badge = 'HTTP 429 Rate Limit';
+      borderColor = 'rgba(239, 68, 68, 0.5)';
+      bgColor = 'rgba(32, 12, 16, 0.95)';
+      actionButtons = `
+        <button id="btn-halt-open-settings" class="btn btn-primary btn-sm" style="background:#38bdf8;border-color:#38bdf8;color:#0f172a;font-weight:700;font-size:11.5px;padding:5px 12px;">
+          ⚙️ Switch Provider / Model in Settings
+        </button>
+        <button id="btn-halt-retry" class="btn btn-secondary btn-sm" style="font-size:11.5px;padding:5px 12px;">
+          ↻ Retry Step
+        </button>
+      `;
+    } else if (isAuth) {
+      icon = '🔑';
+      title = 'Execution Halted: Invalid or Missing API Key';
+      badge = 'Authentication Error';
+      actionButtons = `
+        <button id="btn-halt-open-settings" class="btn btn-primary btn-sm" style="background:#38bdf8;border-color:#38bdf8;color:#0f172a;font-weight:700;font-size:11.5px;padding:5px 12px;">
+          ⚙️ Configure API Key in Settings
+        </button>
+      `;
+    } else if (isTurnLimit) {
+      icon = '⚠️';
+      title = 'Execution Halted: Autonomy Turn Limit Reached';
+      badge = '100 Steps Guardrail';
+      borderColor = 'rgba(245, 158, 11, 0.4)';
+      bgColor = 'rgba(28, 20, 12, 0.95)';
+      titleColor = '#fbbf24';
+      actionButtons = `
+        <button id="btn-halt-resume" class="btn btn-primary btn-sm" style="background:#10b981;border-color:#10b981;font-size:11.5px;padding:5px 12px;font-weight:700;">
+          ▶ Continue Execution
+        </button>
+      `;
     } else {
-      chatTimeline.appendChild(row);
+      title = haltData.title || 'Execution Halted';
+      badge = haltData.badge || 'Error';
+      actionButtons = `
+        <button id="btn-halt-retry" class="btn btn-secondary btn-sm" style="font-size:11.5px;padding:5px 12px;">
+          ↻ Retry Step
+        </button>
+        <button id="btn-halt-open-settings" class="btn btn-secondary btn-sm" style="font-size:11.5px;padding:5px 12px;">
+          ⚙️ Settings
+        </button>
+      `;
+    }
+
+    const reasonText = haltData.reason || haltData.error || 'Execution was interrupted.';
+    const adviceText = haltData.advice || (
+      isRateLimit
+        ? 'Your active AI provider reached its token or request limit. You can switch to Cerebras, NVIDIA NIM, OpenAI, or a lighter model preset in Settings ⚙️ to continue immediately.'
+        : isAuth
+        ? 'Please check or re-enter your API key in the Settings modal.'
+        : isAborted
+        ? 'Autonomous execution was interrupted. All files and workspace progress are safely preserved.'
+        : 'The autonomous loop stopped. Review the diagnostics above or adjust settings.'
+    );
+
+    row.innerHTML = `
+      <div class="chat-sender-row">
+        <span class="chat-sender-avatar">${icon}</span>
+        <span class="chat-sender-name">System Status</span>
+        <span class="chat-sender-badge" style="background:${titleColor}22;color:${titleColor};border:1px solid ${titleColor}55;">${badge}</span>
+        <span class="chat-time">${timeStr}</span>
+      </div>
+      <div class="chat-bubble-agent" style="border-color:${borderColor};background:${bgColor};color:#f1f5f9;">
+        <div style="font-weight:700;color:${titleColor};margin-bottom:6px;font-size:13px;display:flex;align-items:center;gap:6px;">
+          <span>${title}</span>
+        </div>
+        <div style="font-family:var(--font-mono);font-size:11.5px;background:rgba(0,0,0,0.45);padding:8px 12px;border-radius:4px;border:1px solid ${borderColor};color:#fecaca;word-break:break-all;margin-bottom:8px;">
+          ${this.escapeInlineMd(reasonText)}
+        </div>
+        <div style="font-size:12px;color:#cbd5e1;line-height:1.5;margin-bottom:10px;">
+          ${this.escapeInlineMd(adviceText)}
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          ${actionButtons}
+        </div>
+      </div>
+    `;
+
+    chatTimeline.appendChild(row);
+
+    const resumeBtn = row.querySelector('#btn-halt-resume');
+    const retryBtn = row.querySelector('#btn-halt-retry');
+    const settingsBtn = row.querySelector('#btn-halt-open-settings');
+
+    if (resumeBtn) {
+      resumeBtn.addEventListener('click', () => {
+        row.remove();
+        if (this.agentEngine && typeof this.agentEngine.resumeGoal === 'function') {
+          this.agentEngine.resumeGoal();
+        } else if (this.agentEngine && this.agentEngine.currentGoal) {
+          this.agentEngine.executeGoal(this.agentEngine.currentGoal);
+        }
+      });
+    }
+
+    if (retryBtn) {
+      retryBtn.addEventListener('click', () => {
+        row.remove();
+        if (this.agentEngine && typeof this.agentEngine.resumeGoal === 'function') {
+          this.agentEngine.resumeGoal();
+        } else if (this.agentEngine && this.agentEngine.currentGoal) {
+          this.agentEngine.executeGoal(this.agentEngine.currentGoal);
+        }
+      });
+    }
+
+    if (settingsBtn) {
+      settingsBtn.addEventListener('click', () => {
+        this.openSettingsModal();
+      });
     }
 
     const cockpitScroll = document.getElementById('cockpit-scroll-area');

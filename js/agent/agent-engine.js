@@ -41,7 +41,7 @@ export const ANTIGRAVITY_TOOLS = [
     type: "function",
     function: {
       name: "write_to_file",
-      description: "Create or overwrite a file in the workspace (e.g. source files, requirements.txt, implementation_plan.md, walkthrough.md).",
+      description: "Create a NEW file that does not yet exist in the workspace, or generate implementation_plan.md / walkthrough.md. WARNING: NEVER use write_to_file to edit or update an existing code file; you MUST use replace_file_content instead.",
       parameters: {
         type: "object",
         properties: {
@@ -58,12 +58,12 @@ export const ANTIGRAVITY_TOOLS = [
     type: "function",
     function: {
       name: "replace_file_content",
-      description: "Perform precise, targeted edits to an existing file by replacing an exact TargetContent block with ReplacementContent.",
+      description: "Perform precise, targeted edits to an EXISTING file by replacing an exact TargetContent block with ReplacementContent. ALWAYS use this tool instead of write_to_file when updating, editing, or fixing existing files.",
       parameters: {
         type: "object",
         properties: {
           TargetFile: { type: "string", description: "The target file to modify." },
-          TargetContent: { type: "string", description: "The exact substring or block of code to replace." },
+          TargetContent: { type: "string", description: "The exact substring or block of code to replace. Must match the existing file content exactly." },
           ReplacementContent: { type: "string", description: "The new content to replace TargetContent with." },
           StartLine: { type: "integer", description: "Optional starting line number." },
           EndLine: { type: "integer", description: "Optional ending line number." },
@@ -187,7 +187,19 @@ PHASE 1: UPFRONT RESEARCH & MANDATORY PLANNING GATE (Before user clicks proceed)
 - DO NOT create code files (HTML, CSS, JS) or walkthrough.md before plan approval!
 
 PHASE 2: EXECUTION & AUTONOMOUS CODE SYNTHESIS:
-- After the plan is approved, write the actual code files directly using write_to_file and replace_file_content.
+- After the plan is approved, write new code files using write_to_file.
+- CRITICAL SURGICAL EDITING DIRECTIVE:
+  * For EXISTING files, ALWAYS use replace_file_content to make targeted edits to specific lines or blocks.
+  * You are STRICTLY FORBIDDEN from overwriting entire existing code files with write_to_file to make fixes or edits! Rewriting entire files causes code loss, breaks syntax, and introduces regressions.
+  * ONLY use write_to_file when creating a brand new file that does not yet exist, or for implementation_plan.md / walkthrough.md.
+- CRITICAL ANTI-REPETITION & MEMORY DIRECTIVE:
+  * You already have the contents of files you viewed or created in your context history.
+  * NEVER call view_file on a file you just viewed, just created, or just patched.
+  * NEVER run the same shell command multiple times in a row unless you have modified code in between to fix the error.
+- CRITICAL TEST RESULTS & ERROR SELF-CORRECTION DIRECTIVE:
+  * When a command or test exits with code != 0 or returns stderr, the full error is provided in your tool response.
+  * Carefully examine the traceback or compiler message to identify the offending file and line.
+  * Apply a surgical fix using replace_file_content, and re-run the test to verify the exit code is 0.
 - For web applications, create clean, modern index.html, style.css, and app.js.
 - CRITICAL BROWSER FRONTEND vs NODE.JS EXECUTION RULE:
   Browser client scripts (e.g. app.js with document, window, localStorage, addEventListener, Canvas/WebGL) RUN ONLY IN THE WEB BROWSER.
@@ -252,6 +264,8 @@ export class AgentEngine {
     this.currentGoal = '';
     this.planApprovalResolver = null;
     this.conversationHistory = [];
+    this.recentToolCalls = [];
+    this.fileModifiedSinceView = new Set();
 
     this.apiBase = options.apiBase || (typeof window !== 'undefined' ? '' : 'http://localhost:8080');
 
@@ -274,7 +288,7 @@ export class AgentEngine {
     }
   }
 
-  abort() {
+  abort(reason = 'Execution manually stopped by user.') {
     this.isAborted = true;
     if (this.abortController) {
       try {
@@ -288,15 +302,15 @@ export class AgentEngine {
       resolve({ approved: false, aborted: true });
     }
     this.setState('idle');
-    this.terminal?.appendOutput('⏹ Execution stopped by user.', 'warn');
+    this.terminal?.appendOutput(`⏹ ${reason}`, 'warn');
     if (this.monologueEl) {
       const body = this.monologueEl.querySelector('.monologue-text') || this.monologueEl;
       if (body) {
-        body.innerHTML = '<span style="color:#f87171;font-weight:600;">⏹ Execution stopped by user. Ready for your next command.</span>';
+        body.innerHTML = `<span style="color:#f87171;font-weight:600;">⏹ ${escapeHtml(reason)}</span><br/><span style="font-size:11px;color:#94a3b8;">Click Resume Objective or type a new instruction below.</span>`;
       }
     }
     if (this.onExecutionEnd) {
-      this.onExecutionEnd({ aborted: true });
+      this.onExecutionEnd({ aborted: true, reason });
     }
   }
 
@@ -310,6 +324,8 @@ export class AgentEngine {
     this.isPaused = false;
     this.planApproved = false;
     this.conversationHistory = [];
+    this.recentToolCalls = [];
+    this.fileModifiedSinceView = new Set();
     this.planApprovalResolver = null;
     this.turnCount = 0;
 
@@ -320,7 +336,11 @@ export class AgentEngine {
       }
     }
     if (this.streamContainer) {
-      this.streamContainer.innerHTML = '';
+      if (this.streamContainer.id === 'chat-timeline') {
+        this.streamContainer.querySelectorAll('.tool-card, .chat-msg-row').forEach(el => el.remove());
+      } else {
+        this.streamContainer.innerHTML = '';
+      }
     }
     const streamCount = typeof document !== 'undefined' ? document.getElementById('tool-stream-count') : null;
     if (streamCount) streamCount.innerText = '0 calls';
@@ -332,7 +352,7 @@ export class AgentEngine {
     }
   }
 
-  setState(newState) {
+  setState(newState, detail = '') {
     this.state = newState;
     if (this.statusPillEl) {
       this.statusPillEl.className = `execution-status-pill status-${newState}`;
@@ -348,9 +368,10 @@ export class AgentEngine {
           testing: 'Executing Terminal Test Harness',
           healing: 'Autonomous Self-Healing Loop',
           completed: 'Mission Accomplished',
-          error: 'Execution Halted'
+          error: detail ? `Halted: ${detail}` : 'Execution Halted'
         };
-        label.innerText = labels[newState] || newState.toUpperCase();
+        label.innerText = labels[newState] || (detail ? `${newState.toUpperCase()}: ${detail}` : newState.toUpperCase());
+        this.statusPillEl.title = detail ? `Status: ${detail}` : (labels[newState] || newState);
       }
     }
   }
@@ -381,6 +402,8 @@ export class AgentEngine {
     if (!this.streamContainer || typeof document === 'undefined') return null;
     const card = document.createElement('div');
     card.className = 'tool-card running';
+    card._toolName = toolName;
+    card._toolArgs = toolArgs;
 
     const icons = {
       run_command: '💻',
@@ -393,21 +416,86 @@ export class AgentEngine {
       search_web: '🌍'
     };
 
-    let summary = '';
-    if (toolName === 'run_command') {
-      summary = toolArgs.CommandLine || '';
-    } else if (toolName === 'write_to_file') {
-      summary = toolArgs.TargetFile || '';
-    } else if (toolName === 'replace_file_content') {
-      summary = toolArgs.TargetFile || '';
+    let intentHtml = '';
+    if (toolName === 'search_web') {
+      const q = toolArgs.query || toolArgs.Query || '';
+      intentHtml = `
+        <div class="intent-row">
+          <span class="intent-label" style="color:#38bdf8;">🔍 Searched:</span>
+          <span class="intent-value" style="color:#f8fafc;font-weight:600;">"${escapeHtml(q)}"</span>
+        </div>
+      `;
     } else if (toolName === 'view_file') {
-      summary = toolArgs.AbsolutePath || '';
+      const file = toolArgs.AbsolutePath || toolArgs.TargetFile || '';
+      const lineRange = toolArgs.StartLine ? ` (lines ${toolArgs.StartLine}-${toolArgs.EndLine || 'end'})` : '';
+      intentHtml = `
+        <div class="intent-row">
+          <span class="intent-label" style="color:#38bdf8;">👁️ Viewing File:</span>
+          <span class="intent-value" style="color:#f8fafc;font-weight:600;">${escapeHtml(file)}</span>
+          <span style="color:#94a3b8;font-size:10.5px;">${escapeHtml(lineRange)}</span>
+        </div>
+      `;
+    } else if (toolName === 'write_to_file') {
+      const file = toolArgs.TargetFile || '';
+      const desc = toolArgs.Description || '';
+      intentHtml = `
+        <div class="intent-row">
+          <span class="intent-label" style="color:#10b981;">📝 Writing File:</span>
+          <span class="intent-value" style="color:#f8fafc;font-weight:600;">${escapeHtml(file)}</span>
+        </div>
+        ${desc ? `<div class="intent-desc">${escapeHtml(desc)}</div>` : ''}
+      `;
+    } else if (toolName === 'replace_file_content') {
+      const file = toolArgs.TargetFile || '';
+      const instruction = toolArgs.Instruction || '';
+      intentHtml = `
+        <div class="intent-row">
+          <span class="intent-label" style="color:#a855f7;">✂️ Patching File:</span>
+          <span class="intent-value" style="color:#f8fafc;font-weight:600;">${escapeHtml(file)}</span>
+        </div>
+        ${instruction ? `<div class="intent-desc">${escapeHtml(instruction)}</div>` : ''}
+      `;
+    } else if (toolName === 'run_command') {
+      const cmd = toolArgs.CommandLine || '';
+      intentHtml = `
+        <div class="intent-row">
+          <span class="intent-label" style="color:#f59e0b;">💻 Command:</span>
+          <code class="intent-value" style="color:#f8fafc;font-weight:600;">${escapeHtml(cmd)}</code>
+        </div>
+      `;
+    } else if (toolName === 'list_dir') {
+      const dir = toolArgs.DirectoryPath || './workspace/';
+      intentHtml = `
+        <div class="intent-row">
+          <span class="intent-label" style="color:#38bdf8;">📁 Listing Directory:</span>
+          <span class="intent-value" style="color:#f8fafc;font-weight:600;">${escapeHtml(dir)}</span>
+        </div>
+      `;
+    } else if (toolName === 'grep_search') {
+      const q = toolArgs.Query || '';
+      const path = toolArgs.SearchPath || './workspace/';
+      intentHtml = `
+        <div class="intent-row">
+          <span class="intent-label" style="color:#38bdf8;">🔎 Grep Search:</span>
+          <span class="intent-value" style="color:#f8fafc;font-weight:600;">"${escapeHtml(q)}"</span>
+          <span style="color:#94a3b8;font-size:10.5px;">in ${escapeHtml(path)}</span>
+        </div>
+      `;
     } else if (toolName === 'browser_subagent') {
-      summary = toolArgs.Task || 'Inspect Live Preview';
-    } else if (toolName === 'search_web') {
-      summary = toolArgs.query || '';
+      const task = toolArgs.Task || 'Inspect Live Preview';
+      intentHtml = `
+        <div class="intent-row">
+          <span class="intent-label" style="color:#38bdf8;">🌐 Browser Audit:</span>
+          <span class="intent-value" style="color:#f8fafc;font-weight:600;">${escapeHtml(task)}</span>
+        </div>
+      `;
     } else {
-      summary = JSON.stringify(toolArgs).slice(0, 80);
+      intentHtml = `
+        <div class="intent-row">
+          <span class="intent-label" style="color:#94a3b8;">Args:</span>
+          <span class="intent-value">${escapeHtml(JSON.stringify(toolArgs).slice(0, 100))}</span>
+        </div>
+      `;
     }
 
     card.innerHTML = `
@@ -418,10 +506,18 @@ export class AgentEngine {
         </div>
         <span class="tool-badge running">running</span>
       </div>
-      <div class="tool-payload" style="font-family:var(--font-mono);font-size:11px;color:#cbd5e1;white-space:pre-wrap;max-height:120px;overflow-y:auto;">${escapeHtml(summary)}</div>
+      <div class="tool-intent-box">
+        ${intentHtml}
+      </div>
+      <div class="tool-result-box" style="display:none;"></div>
     `;
 
-    this.streamContainer.prepend(card);
+    this.streamContainer.appendChild(card);
+
+    const cockpitScroll = typeof document !== 'undefined' ? document.getElementById('cockpit-scroll-area') : null;
+    if (cockpitScroll) {
+      cockpitScroll.scrollTop = cockpitScroll.scrollHeight;
+    }
 
     const streamCount = typeof document !== 'undefined' ? document.getElementById('tool-stream-count') : null;
     if (streamCount) {
@@ -440,10 +536,128 @@ export class AgentEngine {
       badge.className = `tool-badge ${status}`;
       badge.innerText = status;
     }
-    if (extraText) {
-      const payload = card.querySelector('.tool-payload');
-      if (payload) payload.innerText = extraText;
+
+    const toolName = card._toolName;
+    const toolArgs = card._toolArgs || {};
+    const resultBox = card.querySelector('.tool-result-box');
+
+    if (resultBox) {
+      resultBox.style.display = 'block';
+
+      if (status === 'error') {
+        const errText = toolResult?.error || extraText || 'Tool execution encountered an error.';
+        resultBox.innerHTML = `
+          <div style="color:#f43f5e;font-weight:600;display:flex;align-items:center;gap:4px;">
+            <span>✕</span> <span>${escapeHtml(errText)}</span>
+          </div>
+        `;
+      } else {
+        let resHtml = '';
+
+        if (toolName === 'search_web') {
+          const results = toolResult?.results || [];
+          if (Array.isArray(results) && results.length > 0) {
+            const topResults = results.slice(0, 3);
+            resHtml = `
+              <div style="font-weight:600;color:#10b981;margin-bottom:4px;display:flex;align-items:center;gap:4px;">
+                <span>✔</span> <span>Found ${results.length} web source(s) for "${escapeHtml(toolArgs.query || toolArgs.Query || '')}":</span>
+              </div>
+              ${topResults.map(r => `
+                <div style="margin-top:4px;padding:4px 6px;background:rgba(255,255,255,0.03);border-radius:4px;border-left:2px solid #38bdf8;">
+                  <div style="color:#38bdf8;font-weight:600;font-size:11px;">${escapeHtml(r.title || 'Search Result')}</div>
+                  <div style="color:#cbd5e1;font-size:10.5px;line-height:1.4;margin-top:2px;">${escapeHtml(r.snippet || r.url || '')}</div>
+                </div>
+              `).join('')}
+            `;
+          } else {
+            resHtml = `
+              <div style="color:#10b981;display:flex;align-items:center;gap:4px;">
+                <span>✔</span> <span>Search completed for "${escapeHtml(toolArgs.query || toolArgs.Query || '')}" (no external references returned).</span>
+              </div>
+            `;
+          }
+        } else if (toolName === 'view_file') {
+          const path = toolResult?.FilePath || toolArgs.AbsolutePath || toolArgs.TargetFile || '';
+          const totalLines = toolResult?.TotalLines || (toolResult?.content ? toolResult.content.split('\n').length : 0);
+          const snippet = toolResult?.content ? toolResult.content.slice(0, 450) + (toolResult.content.length > 450 ? '\n... [truncated]' : '') : '';
+          resHtml = `
+            <div style="font-weight:600;color:#10b981;margin-bottom:4px;display:flex;align-items:center;gap:4px;">
+              <span>✔</span> <span>Read ${totalLines} line(s) from <code>${escapeHtml(path)}</code>:</span>
+            </div>
+            ${snippet ? `
+              <pre style="font-family:var(--font-mono);font-size:10px;color:#cbd5e1;max-height:100px;overflow-y:auto;background:rgba(0,0,0,0.35);padding:6px 8px;border-radius:4px;margin:0;white-space:pre-wrap;">${escapeHtml(snippet)}</pre>
+            ` : '<div style="color:#94a3b8;font-style:italic;">(File is empty)</div>'}
+          `;
+        } else if (toolName === 'write_to_file') {
+          const file = toolResult?.TargetFile || toolArgs.TargetFile || '';
+          const bytes = toolResult?.sizeBytes || (toolArgs.CodeContent ? toolArgs.CodeContent.length : 0);
+          const formattedSize = bytes > 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${bytes} B`;
+          resHtml = `
+            <div style="color:#10b981;font-weight:600;display:flex;align-items:center;gap:4px;">
+              <span>✔</span> <span>Successfully saved <code>${escapeHtml(file)}</code> (${formattedSize})</span>
+            </div>
+          `;
+        } else if (toolName === 'replace_file_content') {
+          const file = toolResult?.TargetFile || toolArgs.TargetFile || '';
+          resHtml = `
+            <div style="color:#10b981;font-weight:600;display:flex;align-items:center;gap:4px;">
+              <span>✔</span> <span>Successfully patched <code>${escapeHtml(file)}</code></span>
+            </div>
+          `;
+        } else if (toolName === 'run_command') {
+          const exitCode = toolResult?.exit_code !== undefined ? toolResult.exit_code : 0;
+          const isSuccess = exitCode === 0;
+          const stdout = (toolResult?.stdout || '').trim();
+          const stderr = (toolResult?.stderr || '').trim();
+          resHtml = `
+            <div style="color:${isSuccess ? '#10b981' : '#f43f5e'};font-weight:600;display:flex;align-items:center;gap:4px;">
+              <span>${isSuccess ? '✔' : '✕'}</span> <span>Process exited with code ${exitCode}</span>
+            </div>
+            ${stdout ? `
+              <pre style="font-family:var(--font-mono);font-size:10.5px;color:#cbd5e1;max-height:80px;overflow-y:auto;background:rgba(0,0,0,0.35);padding:4px 6px;border-radius:4px;margin:4px 0 0 0;white-space:pre-wrap;">${escapeHtml(stdout.slice(0, 350))}</pre>
+            ` : ''}
+            ${stderr ? `
+              <pre style="font-family:var(--font-mono);font-size:10.5px;color:#f87171;max-height:80px;overflow-y:auto;background:rgba(244,63,94,0.1);padding:4px 6px;border-radius:4px;margin:4px 0 0 0;white-space:pre-wrap;">${escapeHtml(stderr.slice(0, 350))}</pre>
+            ` : ''}
+          `;
+        } else if (toolName === 'list_dir') {
+          const entries = toolResult?.entries || [];
+          const count = toolResult?.count || entries.length;
+          const names = entries.map(e => e.name + (e.type === 'directory' ? '/' : '')).slice(0, 10).join(', ');
+          resHtml = `
+            <div style="font-weight:600;color:#10b981;margin-bottom:2px;display:flex;align-items:center;gap:4px;">
+              <span>✔</span> <span>Found ${count} item(s):</span>
+            </div>
+            <div style="font-family:var(--font-mono);font-size:10.5px;color:#cbd5e1;">${escapeHtml(names)}${count > 10 ? '...' : ''}</div>
+          `;
+        } else if (toolName === 'grep_search') {
+          const matches = toolResult?.matches || [];
+          const count = toolResult?.matches_count || matches.length;
+          resHtml = `
+            <div style="font-weight:600;color:#10b981;margin-bottom:2px;display:flex;align-items:center;gap:4px;">
+              <span>✔</span> <span>Found ${count} match(es):</span>
+            </div>
+            ${matches.slice(0, 4).map(m => `
+              <div style="font-family:var(--font-mono);font-size:10.5px;color:#cbd5e1;"><span style="color:#94a3b8;">${escapeHtml(m.file)}:${m.line_number}:</span> ${escapeHtml(m.line)}</div>
+            `).join('')}
+          `;
+        } else if (toolName === 'browser_subagent') {
+          resHtml = `
+            <div style="color:#10b981;font-weight:600;display:flex;align-items:center;gap:4px;">
+              <span>✔</span> <span>Headless Chrome certified: <strong>${escapeHtml(toolResult?.title || 'OK')}</strong> (${toolResult?.dom_elements_count || 0} DOM elements)</span>
+            </div>
+            ${toolResult?.console_errors && toolResult.console_errors.length ? `
+              <div style="color:#f43f5e;font-size:10.5px;margin-top:2px;">Errors: ${escapeHtml(toolResult.console_errors.join(', '))}</div>
+            ` : ''}
+          `;
+        } else {
+          resHtml = `<div style="color:#10b981;">✔ ${escapeHtml(extraText || 'Execution completed.')}</div>`;
+        }
+
+        resultBox.innerHTML = resHtml;
+      }
     }
+
     if (toolResult && toolResult.screenshot_url) {
       const existing = card.querySelector('.tool-screenshot-preview');
       if (!existing) {
@@ -464,6 +678,11 @@ export class AgentEngine {
         card.appendChild(previewDiv);
       }
     }
+
+    const cockpitScroll = typeof document !== 'undefined' ? document.getElementById('cockpit-scroll-area') : null;
+    if (cockpitScroll) {
+      cockpitScroll.scrollTop = cockpitScroll.scrollHeight;
+    }
   }
 
   formatToolResultSummary(toolName, result) {
@@ -481,6 +700,10 @@ export class AgentEngine {
       return `Created ${result.TargetFile} (${result.sizeBytes || 0} bytes)`;
     } else if (toolName === 'replace_file_content') {
       return `Patched ${result.TargetFile} cleanly`;
+    } else if (toolName === 'view_file') {
+      return `Read ${result.TotalLines || 0} lines from ${result.FilePath || ''}`;
+    } else if (toolName === 'search_web') {
+      return `Found ${(result.results || []).length} search results for "${result.query || ''}"`;
     } else if (toolName === 'browser_subagent') {
       return `Browser audit: ${result.title || 'OK'} (${result.dom_elements_count || 0} elements, errors: ${result.console_errors?.length || 0})`;
     } else if (toolName === 'list_dir') {
@@ -491,28 +714,79 @@ export class AgentEngine {
     return 'Execution completed.';
   }
 
+  sanitizeMessageContent(m) {
+    if (m.role === 'tool' && typeof m.content === 'string') {
+      const MAX_TOOL_LEN = 1200;
+      if (m.content.length > MAX_TOOL_LEN) {
+        // Preserve both head (first 400 chars) and tail (last 700 chars) so tracebacks and error status are never lost
+        const head = m.content.slice(0, 400);
+        const tail = m.content.slice(-700);
+        return {
+          ...m,
+          content: `${head}\n... [middle output truncated for token budget] ...\n${tail}`
+        };
+      }
+    }
+    return m;
+  }
+
   compactMessages(messages) {
-    if (messages.length <= 8) return messages;
+    // Keep 12 recent messages to maintain strong context while strictly respecting Groq's 7,000 ITPM free-tier budget
+    const MAX_RECENT = 12;
+    if (messages.length <= MAX_RECENT) {
+      return messages.map(m => this.sanitizeMessageContent(m));
+    }
 
     const systemMsg = messages.find(m => m.role === 'system');
     const firstUserMsg = messages.find(m => m.role === 'user');
-    const recentMessages = messages.slice(-8);
+    const recentMessages = messages.slice(-MAX_RECENT);
 
-    const sanitizedRecent = recentMessages.map(m => {
-      if (m.role === 'tool' && typeof m.content === 'string' && m.content.length > 700) {
-        return {
-          ...m,
-          content: m.content.slice(0, 700) + '... [output truncated for brevity]'
-        };
+    // Extract action manifest from earlier messages to preserve awareness of viewed files, modified files, and commands
+    const earlierMessages = messages.slice(0, -MAX_RECENT);
+    const viewedFiles = new Set();
+    const modifiedFiles = new Set();
+    const executedCommands = [];
+
+    for (const m of earlierMessages) {
+      if (m.role === 'assistant' && Array.isArray(m.tool_calls)) {
+        for (const call of m.tool_calls) {
+          const fn = call.function?.name;
+          let args = {};
+          try {
+            args = typeof call.function?.arguments === 'string' ? JSON.parse(call.function.arguments) : (call.function?.arguments || {});
+          } catch (_) {}
+
+          if (fn === 'view_file' && (args.AbsolutePath || args.TargetFile)) {
+            viewedFiles.add(args.AbsolutePath || args.TargetFile);
+          } else if ((fn === 'write_to_file' || fn === 'replace_file_content') && args.TargetFile) {
+            modifiedFiles.add(args.TargetFile);
+          } else if (fn === 'run_command' && args.CommandLine) {
+            if (!executedCommands.includes(args.CommandLine)) {
+              executedCommands.push(args.CommandLine);
+            }
+          }
+        }
       }
-      return m;
-    });
+    }
 
-    const middleCount = messages.length - (systemMsg ? 1 : 0) - (firstUserMsg ? 1 : 0) - recentMessages.length;
-    const summaryMsg = middleCount > 0 ? [{
+    const sanitizedRecent = recentMessages.map(m => this.sanitizeMessageContent(m));
+
+    let summaryText = `[System Context: ${earlierMessages.length} earlier steps executed in workspace.`;
+    if (viewedFiles.size > 0) {
+      summaryText += ` Previously viewed files: ${Array.from(viewedFiles).slice(0, 8).join(', ')}.`;
+    }
+    if (modifiedFiles.size > 0) {
+      summaryText += ` Modified files: ${Array.from(modifiedFiles).slice(0, 8).join(', ')}.`;
+    }
+    if (executedCommands.length > 0) {
+      summaryText += ` Executed commands: ${executedCommands.slice(0, 6).join('; ')}.`;
+    }
+    summaryText += ` Continue progressing toward project completion using replace_file_content for edits.]`;
+
+    const summaryMsg = [{
       role: 'user',
-      content: `[System Context: ${middleCount} earlier steps executed in workspace. Continue progressing toward project completion.]`
-    }] : [];
+      content: summaryText
+    }];
 
     const result = [];
     if (systemMsg) result.push(systemMsg);
@@ -539,7 +813,7 @@ export class AgentEngine {
       temperature: 0.15
     };
 
-    for (let attempt = 1; attempt <= 4; attempt++) {
+    for (let attempt = 1; attempt <= 6; attempt++) {
       if (this.isAborted) {
         return { message: { role: 'assistant', content: 'Execution stopped.' }, tool_calls: [] };
       }
@@ -553,8 +827,10 @@ export class AgentEngine {
         });
 
         if (resp.status === 429) {
-          const waitMs = attempt * 2500;
-          console.warn(`[frAIday Gateway] Rate limit hit (HTTP 429), backing off ${waitMs}ms (attempt ${attempt}/4)...`);
+          const errData = await resp.json().catch(() => ({}));
+          const retryAfterSec = errData.retry_after || (attempt * 2.5);
+          const waitMs = Math.min(Math.round(retryAfterSec * 1000) + 500, 15000);
+          console.warn(`[frAIday Gateway] Rate limit hit (HTTP 429), backing off ${waitMs}ms (attempt ${attempt}/6)...`);
           this.terminal?.appendOutput(`⏳ Rate limit backoff (${waitMs/1000}s)...`, 'info');
           await new Promise(r => setTimeout(r, waitMs));
           continue;
@@ -570,16 +846,47 @@ export class AgentEngine {
         if (err.name === 'AbortError' || this.isAborted) {
           return { message: { role: 'assistant', content: 'Execution stopped by user.' }, tool_calls: [] };
         }
-        if (attempt === 4) throw err;
-        await new Promise(r => setTimeout(r, 1000 * attempt));
+        if (attempt === 6) throw err;
+        await new Promise(r => setTimeout(r, 1200 * attempt));
       }
     }
-    throw new Error('LLM rate limit reached after 4 backoff retries. Please wait a moment.');
+    throw new Error('LLM rate limit reached after 6 backoff retries. Please wait a moment.');
   }
 
   async executeToolCall(toolName, toolArgs, toolCard) {
     if (this.isAborted) {
       return { error: 'Aborted by user', exit_code: 1 };
+    }
+
+    // 1. Tool Deduplication & Anti-Loop Interception
+    if (toolName === 'view_file') {
+      const targetPath = (toolArgs.AbsolutePath || toolArgs.TargetFile || '').replace(/\\/g, '/');
+      const lastView = [...this.recentToolCalls].reverse().find(c => c.name === 'view_file' && ((c.args.AbsolutePath || c.args.TargetFile || '').replace(/\\/g, '/') === targetPath));
+      if (lastView && !this.fileModifiedSinceView.has(targetPath)) {
+        const warningMsg = `File "${targetPath}" was already viewed earlier and has NOT been modified since. Its contents are already present in your conversation history. Do NOT call view_file repeatedly. Please proceed to make your changes using replace_file_content or take the next required action.`;
+        this.terminal?.appendOutput(`ℹ️ [Deduplication] ${warningMsg}`, 'info');
+        return {
+          FilePath: targetPath,
+          warning: warningMsg,
+          already_in_context: true,
+          content: lastView.result?.content || ''
+        };
+      }
+    } else if (toolName === 'run_command') {
+      const cmd = (toolArgs.CommandLine || '').trim();
+      const lastRun = [...this.recentToolCalls].reverse().find(c => c.name === 'run_command' && (c.args.CommandLine || '').trim() === cmd);
+      if (lastRun && this.fileModifiedSinceView.size === 0) {
+        const lastCode = lastRun.result?.exit_code ?? 0;
+        const warningMsg = `Identical command "${cmd}" was just executed with exit code ${lastCode} without any intervening code modifications. Do NOT re-run identical commands in a loop. Use replace_file_content to patch code errors before re-testing.`;
+        this.terminal?.appendOutput(`⚠️ [Anti-Loop] ${warningMsg}`, 'warn');
+        return {
+          CommandLine: cmd,
+          warning: warningMsg,
+          exit_code: lastCode,
+          stdout: lastRun.result?.stdout || '',
+          stderr: (lastRun.result?.stderr || '') + `\n[Anti-Loop Notice]: ${warningMsg}`
+        };
+      }
     }
 
     // Dynamic status updates
@@ -611,7 +918,7 @@ export class AgentEngine {
 
     const result = await resp.json();
 
-    // Mirror actions to IDE components
+    // Mirror actions to IDE components & record modifications
     if (toolName === 'run_command') {
       if (result.stdout) this.terminal?.appendOutput(result.stdout, 'info');
       if (result.stderr) this.terminal?.appendOutput(result.stderr, result.exit_code === 0 ? 'warn' : 'error');
@@ -627,6 +934,10 @@ export class AgentEngine {
         this.terminal?.appendOutput(`✕ Command exited with code ${result.exit_code}`, 'error');
       }
     } else if (toolName === 'write_to_file' || toolName === 'replace_file_content') {
+      const modFile = (toolArgs.TargetFile || '').replace(/\\/g, '/');
+      if (modFile) {
+        this.fileModifiedSinceView.add(modFile);
+      }
       await this.fileTree?.refresh();
       if (this.codeEditor && toolArgs.TargetFile && !toolArgs.TargetFile.endsWith('.png')) {
         this.codeEditor.loadFile(toolArgs.TargetFile);
@@ -648,11 +959,19 @@ export class AgentEngine {
       }
     }
 
+    // Record tool call history for anti-loop deduplication
+    this.recentToolCalls.push({ name: toolName, args: toolArgs, result });
+    if (this.recentToolCalls.length > 20) {
+      this.recentToolCalls.shift();
+    }
+
     return result;
   }
 
   checkWalkthroughCreated() {
-    return this.conversationHistory.some(m => 
+    const lastUserIndex = this.conversationHistory.map(m => m.role).lastIndexOf('user');
+    const relevant = lastUserIndex >= 0 ? this.conversationHistory.slice(lastUserIndex) : this.conversationHistory;
+    return relevant.some(m => 
       m.role === 'tool' && (m.content || '').toLowerCase().includes('walkthrough.md')
     );
   }
@@ -675,6 +994,23 @@ export class AgentEngine {
   }
 
   /**
+   * Seamlessly resume active objective after a pause, stop, or rate-limit reconfiguration
+   */
+  async resumeGoal() {
+    if (!this.currentGoal) return;
+    this.isAborted = false;
+    this.abortController = new AbortController();
+    this.setState('executing', 'Resuming...');
+
+    if (this.onExecutionStart) {
+      this.onExecutionStart();
+    }
+
+    this.streamThought(`Resuming active objective "${this.currentGoal}" with updated AI configuration...`);
+    await this.runExecutionLoop();
+  }
+
+  /**
    * The Full 1-to-1 Antigravity ReAct Autonomous Engine
    * Enforces Planning Gate, Conversational Memory, Continuous Execution, and Walkthrough Certification
    */
@@ -684,6 +1020,8 @@ export class AgentEngine {
     this.isAborted = false;
     this.abortController = new AbortController();
     this.turnCount = 0;
+    this.recentToolCalls = []; // Reset deduplication cache for the new user prompt
+    this.fileModifiedSinceView = new Set();
 
     this.setState('planning');
 
@@ -706,6 +1044,10 @@ export class AgentEngine {
     }
 
     this.streamThought(`Analyzing objective: "${this.currentGoal}"\nInitiating Antigravity Autonomous Lifecycle Engine...`);
+    await this.runExecutionLoop();
+  }
+
+  async runExecutionLoop() {
 
     const maxTurns = 100; // Unlimited, continuous execution until definition of done
 
@@ -719,9 +1061,26 @@ export class AgentEngine {
       } catch (err) {
         if (this.isAborted) break;
         console.error('LLM Gateway Invocation Error:', err);
-        this.terminal?.appendOutput(`❌ LLM Gateway Error: ${err.message}`, 'error');
-        this.setState('error');
-        if (this.onExecutionEnd) this.onExecutionEnd({ error: err.message });
+        const errMsg = err.message || 'LLM Gateway Error';
+        this.terminal?.appendOutput(`❌ LLM Gateway Error: ${errMsg}`, 'error');
+        this.setState('error', errMsg.includes('429') ? 'Rate Limited' : 'Gateway Error');
+
+        if (this.monologueEl) {
+          const body = this.monologueEl.querySelector('.monologue-text') || this.monologueEl;
+          if (body) {
+            body.innerHTML = `<span style="color:#f87171;font-weight:600;">🛑 Execution Halted: ${escapeHtml(errMsg)}</span><br/><span style="font-size:11px;color:#94a3b8;">Switch provider/model in Settings ⚙️ or click Retry below.</span>`;
+          }
+        }
+
+        if (this.onExecutionEnd) {
+          this.onExecutionEnd({
+            error: errMsg,
+            reason: errMsg,
+            advice: errMsg.includes('429')
+              ? 'API rate limit or daily token limit reached. Switch provider (e.g. Cerebras, NVIDIA NIM, OpenAI) or choose another model preset in Settings ⚙️.'
+              : 'The AI model gateway could not complete the request. Verify your API key or network connection in Settings ⚙️.'
+          });
+        }
         return;
       }
 
@@ -747,20 +1106,38 @@ export class AgentEngine {
           continue;
         }
 
+        // CRITICAL CHECK: Did the most recent command or test fail?
+        const lastToolMsg = [...this.conversationHistory].reverse().find(m => m.role === 'tool');
+        if (lastToolMsg && lastToolMsg.name === 'run_command') {
+          try {
+            const parsed = JSON.parse(lastToolMsg.content);
+            if (parsed.exit_code !== 0 || (parsed.stderr && !parsed.stdout)) {
+              this.conversationHistory.push({
+                role: 'user',
+                content: `The test/shell command exited with code ${parsed.exit_code}.\nError Output:\n${(parsed.stderr || parsed.stdout || '').slice(-1200)}\n\nPlease diagnose this failure: inspect the code if needed, apply a surgical fix using replace_file_content (do NOT overwrite entire files), and re-run the command to verify the fix.`
+              });
+              continue;
+            }
+          } catch (_) {}
+        }
+
         const hasCode = this.checkCodeCreated();
         if (!hasCode) {
           this.conversationHistory.push({
             role: 'user',
-            content: 'Plan approved. Now proceed immediately to create the source code files: use write_to_file to write index.html, style.css, and app.js.'
+            content: 'Plan approved. Now proceed immediately to create the source code files: use write_to_file to write new index.html, style.css, and app.js.'
           });
           continue;
         }
 
-        const hasBrowserAudit = this.conversationHistory.some(m => m.name === 'browser_subagent');
-        if (!hasBrowserAudit) {
+        // Check if any tool actions have been performed since the user's latest request
+        const lastUserIdx = this.conversationHistory.map(m => m.role).lastIndexOf('user');
+        const actionsSinceUserPrompt = this.conversationHistory.slice(lastUserIdx + 1).filter(m => m.role === 'tool');
+
+        if (hasCode && actionsSinceUserPrompt.length === 0) {
           this.conversationHistory.push({
             role: 'user',
-            content: 'The source code files have been written. Now invoke browser_subagent to audit the live preview at http://localhost:8080/workspace/index.html and verify that the interface renders properly without errors.'
+            content: `Please take action to address the user's request: "${this.currentGoal}". Use view_file to inspect the code, identify the issue, and apply a targeted fix using replace_file_content.`
           });
           continue;
         }
@@ -769,7 +1146,7 @@ export class AgentEngine {
         if (!hasWalkthrough) {
           this.conversationHistory.push({
             role: 'user',
-            content: 'The application is written and verified. Now create walkthrough.md using write_to_file to document your work, changes made, and verification results before completing the project.'
+            content: 'Changes have been made. Now update or create walkthrough.md using write_to_file to document your work and verification results before completing.'
           });
           continue;
         }
@@ -883,8 +1260,14 @@ export class AgentEngine {
           }
 
           this.terminal?.appendOutput(`📋 Antigravity Planning Gate: implementation_plan.md created. Awaiting human authorization...`, 'warn');
-          this.setState('waiting');
+          this.setState('waiting', 'Awaiting Plan Approval');
           this.isPaused = true;
+          if (this.monologueEl) {
+            const body = this.monologueEl.querySelector('.monologue-text') || this.monologueEl;
+            if (body) {
+              body.innerHTML = `<span style="color:#fbbf24;font-weight:600;">📋 Execution Paused: Planning Gate Active</span><br/><span style="font-size:11.5px;color:#94a3b8;">Review the proposed implementation plan in the <strong>Plan & Artifacts</strong> tab. Click "Approve & Proceed" to begin code synthesis.</span>`;
+            }
+          }
 
           // PAUSE EXECUTION: Wait for human click on "Approve & Proceed" or "Revise Goal"
           const approval = await this.waitForPlanApproval();
@@ -892,7 +1275,13 @@ export class AgentEngine {
 
           if (!approval.approved) {
             this.planApproved = false;
-            this.setState('planning');
+            this.setState('planning', 'Revising Plan');
+            if (this.monologueEl) {
+              const body = this.monologueEl.querySelector('.monologue-text') || this.monologueEl;
+              if (body) {
+                body.innerHTML = `<span style="color:#fbbf24;font-weight:600;">Plan revisions requested: "${escapeHtml(approval.feedback || 'Revise plan')}". Re-architecting...</span>`;
+              }
+            }
             this.conversationHistory.push({
               role: 'user',
               content: `[Human Feedback on Plan]: ${approval.feedback || 'Please revise the implementation plan.'}. Update implementation_plan.md with write_to_file.`
@@ -900,7 +1289,13 @@ export class AgentEngine {
             break; // Let model re-generate revised plan
           } else {
             this.planApproved = true;
-            this.setState('executing');
+            this.setState('executing', 'Synthesizing Code');
+            if (this.monologueEl) {
+              const body = this.monologueEl.querySelector('.monologue-text') || this.monologueEl;
+              if (body) {
+                body.innerHTML = `<span style="color:#34d399;font-weight:600;">✔ Plan approved! Proceeding to synthesize source files...</span>`;
+              }
+            }
             this.conversationHistory.push({
               role: 'user',
               content: `The implementation plan has been approved by the user! Proceed immediately to synthesize the real source code files (index.html, style.css, app.js), verify with browser_subagent, and write walkthrough.md.`
@@ -919,7 +1314,24 @@ export class AgentEngine {
     }
 
     if (this.isAborted && this.onExecutionEnd) {
-      this.onExecutionEnd({ aborted: true });
+      this.onExecutionEnd({ aborted: true, reason: 'Execution manually stopped by user.' });
+    } else if (this.turnCount >= maxTurns && !this.checkWalkthroughCreated()) {
+      const turnMsg = `Maximum autonomous turn limit reached (${maxTurns} steps).`;
+      this.setState('error', 'Turn Limit Reached');
+      this.terminal?.appendOutput(`⚠️ ${turnMsg}`, 'warn');
+      if (this.monologueEl) {
+        const body = this.monologueEl.querySelector('.monologue-text') || this.monologueEl;
+        if (body) {
+          body.innerHTML = `<span style="color:#fbbf24;font-weight:600;">⚠️ ${turnMsg}</span><br/><span style="font-size:11px;color:#94a3b8;">Current workspace files are preserved. Click Resume or enter a prompt below.</span>`;
+        }
+      }
+      if (this.onExecutionEnd) {
+        this.onExecutionEnd({
+          error: turnMsg,
+          reason: turnMsg,
+          advice: 'Autonomous execution paused after 100 turns to prevent runaway loops. All created code is saved in your workspace.'
+        });
+      }
     }
   }
 
@@ -935,7 +1347,13 @@ export class AgentEngine {
     }
 
     this.terminal?.appendOutput(`✔ Planning Gate: User approved implementation plan. Resuming execution...`, 'success');
-    this.setState('executing');
+    this.setState('executing', 'Synthesizing Code');
+    if (this.monologueEl) {
+      const body = this.monologueEl.querySelector('.monologue-text') || this.monologueEl;
+      if (body) {
+        body.innerHTML = `<span style="color:#34d399;font-weight:600;">✔ Plan approved! Resuming execution...</span>`;
+      }
+    }
 
     if (this.planApprovalResolver) {
       const resolve = this.planApprovalResolver;
@@ -956,7 +1374,13 @@ export class AgentEngine {
     }
 
     this.terminal?.appendOutput(`✕ Planning Gate: User requested plan revisions: ${feedback || 'Please revise objective.'}`, 'warn');
-    this.setState('planning');
+    this.setState('planning', 'Revising Plan');
+    if (this.monologueEl) {
+      const body = this.monologueEl.querySelector('.monologue-text') || this.monologueEl;
+      if (body) {
+        body.innerHTML = `<span style="color:#fbbf24;font-weight:600;">Plan revisions requested: "${escapeHtml(feedback || 'Revise plan')}". Re-architecting...</span>`;
+      }
+    }
 
     if (this.planApprovalResolver) {
       const resolve = this.planApprovalResolver;

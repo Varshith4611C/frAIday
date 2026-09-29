@@ -1,41 +1,39 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Book My Show</title>
-  <!-- Google Fonts -->
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet" />
-  <!-- Tailwind CSS via CDN -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Flatpickr CSS & JS -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css" />
-  <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
-  <!-- Lucide Icons -->
-  <script src="https://cdn.jsdelivr.net/npm/lucide@0.262.0/dist/lucide.min.js"></script>
-  <!-- Custom CSS -->
-  <link rel="stylesheet" href="style.css" />
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Simple Calculator</title>
+    <link rel="stylesheet" href="style.css" />
 </head>
-<body class="font-inter bg-gray-100">
-  <header class="bg-white shadow p-4 flex items-center justify-between">
-    <h1 class="text-2xl font-semibold text-gray-800">Book My Show</h1>
-  </header>
-
-  <main class="p-4 max-w-4xl mx-auto">
-    <section id="shows" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <!-- Show cards will be injected by app.js -->
+<body>
+    <section class="calculator" aria-label="Simple calculator">
+        <output id="display" class="display" aria-live="polite">0</output>
+        <div class="buttons">
+            <!-- Row 1 -->
+            <button class="btn" data-key="7" aria-label="Seven">7</button>
+            <button class="btn" data-key="8" aria-label="Eight">8</button>
+            <button class="btn" data-key="9" aria-label="Nine">9</button>
+            <button class="btn operator" data-key="/" aria-label="Divide">÷</button>
+            <!-- Row 2 -->
+            <button class="btn" data-key="4" aria-label="Four">4</button>
+            <button class="btn" data-key="5" aria-label="Five">5</button>
+            <button class="btn" data-key="6" aria-label="Six">6</button>
+            <button class="btn operator" data-key="*" aria-label="Multiply">×</button>
+            <!-- Row 3 -->
+            <button class="btn" data-key="1" aria-label="One">1</button>
+            <button class="btn" data-key="2" aria-label="Two">2</button>
+            <button class="btn" data-key="3" aria-label="Three">3</button>
+            <button class="btn operator" data-key="-" aria-label="Subtract">−</button>
+            <!-- Row 4 -->
+            <button class="btn" data-key="0" aria-label="Zero">0</button>
+            <button class="btn" data-key="." aria-label="Decimal point">.</button>
+            <button class="btn" id="clear" aria-label="Clear">C</button>
+            <button class="btn operator" data-key="+" aria-label="Add">+</button>
+            <!-- Row 5 -->
+            <button class="btn equal" id="equals" aria-label="Equals" style="grid-column: span 4;">=</button>
+        </div>
     </section>
-  </main>
-
-  <!-- Modal -->
-  <div id="modal" class="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 hidden">
-    <div class="bg-white rounded-lg shadow-lg p-6 w-11/12 max-w-md">
-      <h2 class="text-xl font-semibold mb-4">Booking Confirmation</h2>
-      <p id="modal-content" class="mb-4"></p>
-      <button id="close-modal" class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">Close</button>
-    </div>
-  </div>
-
-  <script src="app.js"></script>
+    <script src="app.js"></script>
 </body>
 </html>

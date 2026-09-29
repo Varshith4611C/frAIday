@@ -1,9 +1,122 @@
-/* style.css - minimal custom styles */
+/* style.css – Dark theme calculator with cyan accent */
 
-/* Utility class to hide elements */
-.hidden { display: none !important; }
+:root {
+    --bg-color: #121212;
+    --accent-color: #00bcd4;
+    --text-color: #e0e0e0;
+    --button-bg: #1e1e1e;
+    --button-hover: #2a2a2a;
+    --operator-bg: #004d40;
+    --operator-hover: #00695c;
+    --equal-bg: #00695c;
+    --equal-hover: #00897b;
+    --font-family: 'Segoe UI', Tahoma, sans-serif;
+}
 
-/* Center modal content vertically and horizontally */
-#modal {
-  display: flex;
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    background: var(--bg-color);
+    color: var(--text-color);
+    font-family: var(--font-family);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 1rem;
+}
+
+.calculator {
+    background: #1b1b1b;
+    border-radius: 12px;
+    padding: 1.5rem;
+    width: 320px;
+    max-width: 100%;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.display {
+    background: #0d0d0d;
+    color: var(--accent-color);
+    font-size: 2rem;
+    text-align: right;
+    padding: 0.5rem 0.75rem;
+    border-radius: 8px;
+    overflow-x: auto;
+    min-height: 2.5rem;
+}
+
+.buttons {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.75rem;
+}
+
+.btn {
+    background: var(--button-bg);
+    border: none;
+    color: var(--text-color);
+    font-size: 1.25rem;
+    padding: 0.75rem;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.btn:focus {
+    outline: 2px solid var(--accent-color);
+    outline-offset: 2px;
+}
+
+.btn:hover {
+    background: var(--button-hover);
+}
+
+.operator {
+    background: var(--operator-bg);
+    color: #fff;
+}
+
+.operator:hover {
+    background: var(--operator-hover);
+}
+
+.equal {
+    background: var(--equal-bg);
+    color: #fff;
+    font-weight: bold;
+    grid-column: span 4;
+}
+
+.equal:hover {
+    background: var(--equal-hover);
+}
+
+#clear {
+    background: #b71c1c;
+    color: #fff;
+}
+
+#clear:hover {
+    background: #c62828;
+}
+
+@media (max-width: 400px) {
+    .calculator {
+        padding: 1rem;
+    }
+    .display {
+        font-size: 1.5rem;
+    }
+    .btn {
+        font-size: 1rem;
+        padding: 0.6rem;
+    }
 }

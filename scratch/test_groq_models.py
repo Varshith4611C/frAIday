@@ -1,7 +1,8 @@
+import os
 import urllib.request
 import json
 
-api_key = "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"
+api_key = os.environ.get("GROQ_API_KEY", "")
 
 req = urllib.request.Request(
     "https://api.groq.com/openai/v1/models",

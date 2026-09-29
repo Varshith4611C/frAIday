@@ -2,7 +2,7 @@
  * frAIday — 1-to-1 Antigravity Autonomous Agentic Software Engineer
  * 
  * Exact Antigravity Mechanisms:
- * 1. Autonomous ReAct Tool-Calling Loop with Groq (openai/gpt-oss-120b) & Cerebras
+ * 1. Autonomous ReAct Tool-Calling Loop with NVIDIA NIM (meta/llama-3.2-11b) & Groq
  * 2. 8 Native Antigravity Tools:
  *    - run_command(CommandLine, Cwd)
  *    - write_to_file(TargetFile, CodeContent)
@@ -148,15 +148,53 @@ export const ANTIGRAVITY_TOOLS = [
         required: ["query"]
       }
     }
+  },
+  {
+    type: "function",
+    function: {
+      name: "retain_memory",
+      description: "Retain a new learned rule, architectural standard, environment fact, or incident post-mortem into Vectorize Hindsight memory bank. The memory persists across all future agent sessions.",
+      parameters: {
+        type: "object",
+        properties: {
+          topic: { type: "string", description: "Short title of the rule or concept (e.g. 'Postgres Port Convention', 'Pydantic v2 Syntax')." },
+          content: { type: "string", description: "The detailed rule, fact, or incident resolution to retain." },
+          memory_type: { type: "string", enum: ["mental_model", "observation", "world_fact", "experience_fact"], description: "Hindsight memory tier: mental_model (high-level directive), observation (empirical fact), world_fact (repo/env fact), or experience_fact (incident post-mortem)." },
+          tags: { type: "array", items: { type: "string" }, description: "Relevant keyword tags for hybrid search indexing." }
+        },
+        required: ["topic", "content"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "recall_memory",
+      description: "Explicitly query Vectorize Hindsight memory bank for past project rules, architectural decisions, and incident post-mortems using TEMPR hybrid retrieval.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Natural language query to search Hindsight memory bank." }
+        },
+        required: ["query"]
+      }
+    }
   }
 ];
 
 export const ANTIGRAVITY_SYSTEM_PROMPT = `<identity>
-You are frAIday, a powerful autonomous AI software engineer and coding assistant modeled exactly on Google DeepMind Antigravity.
+You are frAIday, a powerful autonomous AI software engineer powered by Vectorize Hindsight Memory.
 You are pair programming with the user to solve their software development objectives from end-to-end.
-You have direct, autonomous access to the workspace shell terminal, filesystem, web research, and headless browser inspection.
+You have direct, autonomous access to the workspace shell terminal, filesystem, web research, headless browser inspection, and persistent Hindsight memory.
 You do everything autonomously without expecting the user to install packages, run commands, or fix bugs for you.
 </identity>
+
+<hindsight_memory_layer>
+You are powered by Vectorize Hindsight—an agent memory system that learns over time through Retain, Recall, and Reflect.
+1. When you start any task, past repository conventions, mental models, and incident post-mortems are recalled into your context.
+2. You MUST strictly adhere to recalled mental models and verified observations (e.g. database ports, framework versions, build conventions).
+3. If you discover a novel architectural pattern, resolve a tricky bug, or receive developer instructions, you can call retain_memory to store this lesson permanently into Hindsight so you never repeat the mistake in future sessions.
+</hindsight_memory_layer>
 
 <planning_mode>
 You operate strictly through the 4-Phase Antigravity Lifecycle:
@@ -230,6 +268,22 @@ PHASE 4: WALKTHROUGH DOCUMENTATION (Definition of Done - Strictly Created at Las
 - Keep conversational text focused; prioritize real tool calls over commentary.
 </communication_style>`;
 
+export const STATELESS_BASELINE_SYSTEM_PROMPT = `<identity>
+You are frAIday running in STATELESS BASELINE DEMO MODE (Standard AI without Memory).
+You are pair programming with the user to solve their software development objectives from end-to-end.
+You have direct, autonomous access to the workspace shell terminal, filesystem, web research, and headless browser inspection.
+IMPORTANT: Vectorize Hindsight memory is explicitly SWITCHED OFF by the user for comparison benchmarking.
+You operate strictly as a standard, stateless AI model. You have NO access to past memories, NO access to previous sessions, NO saved user preferences, and NO memory tools.
+If the user asks you to recall preferences or check Hindsight memory, explicitly inform them that Hindsight memory is switched OFF in Stateless Baseline Mode, and proceed with standard default design and implementation.
+</identity>
+
+<stateless_baseline_notice>
+MEMORY SYSTEM STATUS: DISABLED
+You do NOT have retain_memory or recall_memory tools in your tool manifest. All memory injection is bypassed.
+You must construct your solution based entirely on the immediate prompt without historical context.
+</stateless_baseline_notice>
+` + ANTIGRAVITY_SYSTEM_PROMPT.replace(/<identity>[\s\S]*?<\/identity>/, '').replace(/<hindsight_memory_layer>[\s\S]*?<\/hindsight_memory_layer>/, '').trim();
+
 export class AgentEngine {
   constructor(options = {}) {
     this.monologueEl = options.monologueEl;
@@ -264,17 +318,62 @@ export class AgentEngine {
     this.currentGoal = '';
     this.planApprovalResolver = null;
     this.conversationHistory = [];
+    this.timelineEvents = [];
+    this._saveSessionTimer = null;
     this.recentToolCalls = [];
     this.fileModifiedSinceView = new Set();
+    this.activeRuntimeErrors = new Map();
+
+    const storedHindsight = typeof localStorage !== 'undefined' ? localStorage.getItem('fraiday_hindsight_enabled') : null;
+    this._hindsightEnabled = storedHindsight !== null ? storedHindsight === 'true' : true;
 
     this.apiBase = options.apiBase || (typeof window !== 'undefined' ? '' : 'http://localhost:8080');
 
     const storage = typeof localStorage !== 'undefined' ? localStorage : { getItem: () => null, setItem: () => {} };
     this.provider = storage.getItem('fraiday_provider') || 'groq';
-    this.apiKey = storage.getItem('fraiday_api_key') || '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';
-    this.model = storage.getItem('fraiday_model') || 'openai/gpt-oss-20b';
+    this.apiKey = storage.getItem('fraiday_api_key') || '';
+    this.model = storage.getItem('fraiday_model') || 'openai/gpt-oss-120b';
 
     this.turnCount = 0;
+  }
+
+  get hindsightEnabled() {
+    return this._hindsightEnabled !== false;
+  }
+
+  set hindsightEnabled(val) {
+    this._hindsightEnabled = Boolean(val);
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem('fraiday_hindsight_enabled', this._hindsightEnabled ? 'true' : 'false');
+      } catch (_) {}
+    }
+  }
+
+  setHindsightMode(enabled) {
+    this.hindsightEnabled = enabled;
+    const targetPrompt = this.hindsightEnabled ? ANTIGRAVITY_SYSTEM_PROMPT : STATELESS_BASELINE_SYSTEM_PROMPT;
+    if (this.conversationHistory && this.conversationHistory.length > 0 && this.conversationHistory[0].role === 'system') {
+      this.conversationHistory[0].content = targetPrompt;
+    }
+    this.terminal?.appendOutput(
+      this.hindsightEnabled
+        ? `🧠 [Mode Switch] Switched to Hindsight Active Mode (Persistent Learning & TEMPR Retrieval Enabled).`
+        : `⚪ [Mode Switch] Switched to Stateless Baseline Mode (Standard AI without Memory - All Recall & Retain Blocked).`,
+      this.hindsightEnabled ? 'info' : 'warn'
+    );
+  }
+
+  getActiveTools() {
+    if (this.hindsightEnabled === false) {
+      return ANTIGRAVITY_TOOLS.filter(t => {
+        const name = t.function?.name || '';
+        return name !== 'recall_memory' && 
+               name !== 'retain_memory' && 
+               name !== 'reflect_memory';
+      });
+    }
+    return ANTIGRAVITY_TOOLS;
   }
 
   setLlmConfig(provider, apiKey, model) {
@@ -286,6 +385,87 @@ export class AgentEngine {
       localStorage.setItem('fraiday_api_key', apiKey);
       localStorage.setItem('fraiday_model', model);
     }
+  }
+
+  saveSession() {
+    try {
+      const monologueBody = this.monologueEl ? (this.monologueEl.querySelector('.monologue-text') || this.monologueEl) : null;
+      const sessionData = {
+        currentGoal: this.currentGoal || '',
+        state: this.state || 'idle',
+        turnCount: this.turnCount || 0,
+        planApproved: Boolean(this.planApproved),
+        conversationHistory: this.conversationHistory || [],
+        timelineEvents: this.timelineEvents || [],
+        monologueHtml: monologueBody ? monologueBody.innerHTML : '',
+        knowledgeItems: this.knowledgeBase?.items || [],
+        dagStage: this.dagCanvas?.activeNodeId || null,
+        dagNodes: this.dagCanvas?.nodes || null,
+        hindsightEnabled: this.hindsightEnabled !== false,
+        savedAt: new Date().toISOString()
+      };
+
+      const serialized = JSON.stringify(sessionData);
+
+      // 1. Browser local storage (scoped by active workspace)
+      const storageKey = `fraiday_session_${this.workspace || 'default'}`;
+      if (typeof localStorage !== 'undefined') {
+        try {
+          localStorage.setItem(storageKey, serialized);
+        } catch (quotaErr) {
+          console.warn('localStorage quota reached, relying on backend disk session:', quotaErr);
+        }
+      }
+
+      // 2. Guaranteed on-disk persistence via backend /api/session (persists across server restart & shutdown)
+      if (typeof fetch !== 'undefined') {
+        fetch(`${this.apiBase}/api/session`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: serialized
+        }).catch(err => {
+          console.warn('Backend session disk write note:', err);
+        });
+      }
+    } catch (err) {
+      console.warn('Failed to save session:', err);
+    }
+  }
+
+  debouncedSaveSession() {
+    if (this._saveSessionTimer) clearTimeout(this._saveSessionTimer);
+    this._saveSessionTimer = setTimeout(() => {
+      this.saveSession();
+    }, 150);
+  }
+
+  setWorkspace(name) {
+    this.workspace = name || 'default';
+  }
+
+  async clearSession() {
+    if (this._saveSessionTimer) clearTimeout(this._saveSessionTimer);
+    this.timelineEvents = [];
+    const storageKey = `fraiday_session_${this.workspace || 'default'}`;
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.removeItem(storageKey);
+      } catch (_) {}
+    }
+    if (typeof fetch !== 'undefined') {
+      try {
+        await fetch(`${this.apiBase}/api/session`, { method: 'DELETE' });
+      } catch (_) {}
+    }
+  }
+
+  recordTimelineEvent(event) {
+    if (!this.timelineEvents) this.timelineEvents = [];
+    if (!event.timestamp) {
+      event.timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+    this.timelineEvents.push(event);
+    this.debouncedSaveSession();
   }
 
   abort(reason = 'Execution manually stopped by user.') {
@@ -312,6 +492,7 @@ export class AgentEngine {
     if (this.onExecutionEnd) {
       this.onExecutionEnd({ aborted: true, reason });
     }
+    this.saveSession();
   }
 
   reset() {
@@ -324,10 +505,12 @@ export class AgentEngine {
     this.isPaused = false;
     this.planApproved = false;
     this.conversationHistory = [];
+    this.timelineEvents = [];
     this.recentToolCalls = [];
     this.fileModifiedSinceView = new Set();
     this.planApprovalResolver = null;
     this.turnCount = 0;
+    this.clearSession();
 
     if (this.monologueEl) {
       const body = this.monologueEl.querySelector('.monologue-text') || this.monologueEl;
@@ -374,6 +557,25 @@ export class AgentEngine {
         this.statusPillEl.title = detail ? `Status: ${detail}` : (labels[newState] || newState);
       }
     }
+
+    if (this.dagCanvas && typeof this.dagCanvas.setActiveStage === 'function') {
+      const stageMap = {
+        idle: 'goal_intake',
+        planning: 'architecture_plan',
+        researching: 'research',
+        waiting: 'planning_gate',
+        executing: 'code_synthesis',
+        validating: 'verification',
+        testing: 'verification',
+        healing: 'self_healing',
+        completed: 'delivery'
+      };
+      if (newState === 'completed') {
+        this.dagCanvas.markComplete();
+      } else if (stageMap[newState]) {
+        this.dagCanvas.setActiveStage(stageMap[newState], detail || null);
+      }
+    }
   }
 
   async streamThought(text) {
@@ -396,14 +598,18 @@ export class AgentEngine {
       body.innerHTML = current;
       await new Promise(r => setTimeout(r, 12));
     }
+    this.debouncedSaveSession();
   }
 
-  addAntigravityToolCard(toolName, toolArgs) {
+  addAntigravityToolCard(toolName, toolArgs, existingId = null, skipRecord = false) {
     if (!this.streamContainer || typeof document === 'undefined') return null;
+    const cardId = existingId || ('tool_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5));
     const card = document.createElement('div');
     card.className = 'tool-card running';
     card._toolName = toolName;
     card._toolArgs = toolArgs;
+    card._cardId = cardId;
+    card.setAttribute('data-card-id', cardId);
 
     const icons = {
       run_command: '💻',
@@ -413,7 +619,10 @@ export class AgentEngine {
       list_dir: '📁',
       grep_search: '🔎',
       browser_subagent: '🌐',
-      search_web: '🌍'
+      search_web: '🌍',
+      recall_memory: '🧠',
+      retain_memory: '💾',
+      reflect_memory: '🔮'
     };
 
     let intentHtml = '';
@@ -525,10 +734,24 @@ export class AgentEngine {
       streamCount.innerText = `${current + 1} calls`;
     }
 
+    if (!skipRecord) {
+      this.recordTimelineEvent({
+        type: 'tool_card',
+        id: cardId,
+        toolName,
+        toolArgs,
+        status: 'running',
+        extraText: null,
+        toolResult: null,
+        screenshotUrl: null,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      });
+    }
+
     return card;
   }
 
-  updateToolCard(card, status, extraText = null, toolResult = null) {
+  updateToolCard(card, status, extraText = null, toolResult = null, skipRecord = false) {
     if (!card) return;
     card.className = `tool-card ${status}`;
     const badge = card.querySelector('.tool-badge');
@@ -546,9 +769,10 @@ export class AgentEngine {
 
       if (status === 'error') {
         const errText = toolResult?.error || extraText || 'Tool execution encountered an error.';
+        const isBlocked = toolResult?.disabled || (extraText && extraText.includes('Stateless Baseline'));
         resultBox.innerHTML = `
-          <div style="color:#f43f5e;font-weight:600;display:flex;align-items:center;gap:4px;">
-            <span>✕</span> <span>${escapeHtml(errText)}</span>
+          <div style="color:${isBlocked ? '#f59e0b' : '#f43f5e'};font-weight:600;display:flex;align-items:center;gap:6px;">
+            <span>${isBlocked ? '⚪' : '✕'}</span> <span>${escapeHtml(errText)}</span>
           </div>
         `;
       } else {
@@ -683,10 +907,26 @@ export class AgentEngine {
     if (cockpitScroll) {
       cockpitScroll.scrollTop = cockpitScroll.scrollHeight;
     }
+
+    if (!skipRecord && card && card._cardId) {
+      const ev = (this.timelineEvents || []).find(e => e.id === card._cardId);
+      if (ev) {
+        ev.status = status;
+        if (extraText) ev.extraText = extraText;
+        if (toolResult) ev.toolResult = toolResult;
+        if (toolResult && toolResult.screenshot_url) {
+          ev.screenshotUrl = toolResult.screenshot_url;
+        }
+      }
+      this.debouncedSaveSession();
+    }
   }
 
   formatToolResultSummary(toolName, result) {
     if (!result) return 'Completed.';
+    if (result.disabled) {
+      return result.error || 'Stateless Baseline: Memory operation blocked.';
+    }
     if (toolName === 'run_command') {
       const exitCode = result.exit_code !== undefined ? result.exit_code : 0;
       const stdout = (result.stdout || '').trim();
@@ -710,29 +950,58 @@ export class AgentEngine {
       return `Found ${result.entries?.length || 0} items`;
     } else if (toolName === 'grep_search') {
       return `Found ${result.matches_count || 0} matches`;
+    } else if (toolName === 'recall_memory') {
+      return `Recalled ${(result.results || []).length} memories from Hindsight bank`;
+    } else if (toolName === 'retain_memory') {
+      return `Retained memory to Hindsight bank`;
+    } else if (toolName === 'reflect_memory') {
+      return `Synthesized Hindsight memory reflection`;
     }
     return 'Execution completed.';
   }
 
+  distillToolContent(content) {
+    if (typeof content !== 'string') return content;
+    let text = content;
+
+    // 1. Strip ANSI escape color codes
+    text = text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+
+    // 2. Strip curl / wget download progress meter spam (saves hundreds of wasted tokens)
+    if (text.includes('% Total') || text.includes('% Received') || text.includes('Dload  Upload')) {
+      text = text.replace(/% Total[\s\S]*?Dload\s+Upload[^\n]*\n([\s0-9:.-]+\n)*/gi, '[Download transfer completed] ');
+    }
+
+    // 3. Strip git / terminal progress spinners & carriage returns
+    text = text.replace(/\r[^\n]*/g, '');
+
+    // 4. Collapse repetitive empty lines or delimiter rules
+    text = text.replace(/\n{3,}/g, '\n\n');
+    text = text.replace(/([=-]){10,}/g, '$1$1$1$1$1');
+
+    // 5. Intelligent truncation: preserve head (600 chars) and tail (600 chars) for error tracebacks and return codes
+    const MAX_TOOL_LEN = 1300;
+    if (text.length > MAX_TOOL_LEN) {
+      const head = text.slice(0, 600);
+      const tail = text.slice(-600);
+      text = `${head}\n... [${text.length - 1200} chars compressed for token efficiency] ...\n${tail}`;
+    }
+    return text;
+  }
+
   sanitizeMessageContent(m) {
     if (m.role === 'tool' && typeof m.content === 'string') {
-      const MAX_TOOL_LEN = 1200;
-      if (m.content.length > MAX_TOOL_LEN) {
-        // Preserve both head (first 400 chars) and tail (last 700 chars) so tracebacks and error status are never lost
-        const head = m.content.slice(0, 400);
-        const tail = m.content.slice(-700);
-        return {
-          ...m,
-          content: `${head}\n... [middle output truncated for token budget] ...\n${tail}`
-        };
-      }
+      return {
+        ...m,
+        content: this.distillToolContent(m.content)
+      };
     }
     return m;
   }
 
   compactMessages(messages) {
-    // Keep 12 recent messages to maintain strong context while strictly respecting Groq's 7,000 ITPM free-tier budget
-    const MAX_RECENT = 12;
+    // Keep 10 recent messages with distilled noise-free content for deep context and high code capacity
+    const MAX_RECENT = 10;
     if (messages.length <= MAX_RECENT) {
       return messages.map(m => this.sanitizeMessageContent(m));
     }
@@ -796,20 +1065,31 @@ export class AgentEngine {
     return result;
   }
 
-  async callLlmRaw(messages, tools = ANTIGRAVITY_TOOLS) {
+  async callLlmRaw(messages, tools = null) {
     if (this.isAborted) {
       return { message: { role: 'assistant', content: 'Execution stopped.' }, tool_calls: [] };
     }
 
+    const activeTools = tools !== null ? tools : this.getActiveTools();
     const compacted = this.compactMessages(messages);
+
+    // Solution 1: Dynamic Max-Tokens Allocation (Up to 4,096 Tokens)
+    let dynamicMaxTokens = 4096;
+    if (this.provider === 'groq' && this.model && this.model.includes('120b')) {
+      const msgTokens = Math.ceil(JSON.stringify(compacted).length / 3.8);
+      const toolsTokens = activeTools && activeTools.length > 0 ? 900 : 0;
+      const totalPromptEst = msgTokens + toolsTokens;
+      dynamicMaxTokens = Math.min(4096, Math.max(2000, 7700 - totalPromptEst));
+    }
+
     const payload = {
       provider: this.provider,
       api_key: this.apiKey,
       model: this.model,
       messages: compacted,
-      tools: tools,
+      tools: activeTools,
       tool_choice: "auto",
-      max_tokens: 1500,
+      max_tokens: dynamicMaxTokens,
       temperature: 0.15
     };
 
@@ -838,7 +1118,21 @@ export class AgentEngine {
 
         if (!resp.ok) {
           const err = await resp.json().catch(() => ({}));
-          throw new Error(err.error || `LLM Gateway Error (HTTP ${resp.status})`);
+          const errMsg = err.error || '';
+          if (resp.status === 413 || /too large|tpm|8000|413|request size/i.test(errMsg)) {
+            console.warn(`[frAIday Gateway] TPM / Request size exceeded (HTTP 413). Compacting context and retrying...`);
+            this.terminal?.appendOutput(`⚡ Auto-compressing history to preserve code generation capacity (attempt ${attempt}/6)...`, 'info');
+            // NEVER choke completion tokens below 1800, or code tools get cut off and throw JSON errors!
+            // Prune older conversational turns instead:
+            if (payload.messages && payload.messages.length > 3) {
+              const sys = payload.messages.filter(m => m.role === 'system');
+              const recent = payload.messages.slice(-4);
+              payload.messages = [...sys, ...recent];
+            }
+            await new Promise(r => setTimeout(r, 1000));
+            continue;
+          }
+          throw new Error(errMsg || `LLM Gateway Error (HTTP ${resp.status})`);
         }
 
         return await resp.json();
@@ -846,8 +1140,10 @@ export class AgentEngine {
         if (err.name === 'AbortError' || this.isAborted) {
           return { message: { role: 'assistant', content: 'Execution stopped by user.' }, tool_calls: [] };
         }
+        console.warn(`[frAIday Gateway] Network error on attempt ${attempt}/6: ${err.message}. Retrying...`);
+        this.terminal?.appendOutput(`⏳ Gateway reconnecting (${err.message || 'network wait'})...`, 'info');
         if (attempt === 6) throw err;
-        await new Promise(r => setTimeout(r, 1200 * attempt));
+        await new Promise(r => setTimeout(r, 1500 * attempt));
       }
     }
     throw new Error('LLM rate limit reached after 6 backoff retries. Please wait a moment.');
@@ -856,6 +1152,20 @@ export class AgentEngine {
   async executeToolCall(toolName, toolArgs, toolCard) {
     if (this.isAborted) {
       return { error: 'Aborted by user', exit_code: 1 };
+    }
+
+    // 0. Stateless Baseline Interception: Block memory operations when Hindsight is disabled
+    if ((toolName === 'recall_memory' || toolName === 'retain_memory' || toolName === 'reflect_memory') && this.hindsightEnabled === false) {
+      const errorMsg = "Hindsight Memory is SWITCHED OFF (Stateless Baseline Mode). Memory recall and retention are completely disabled. The agent operates strictly without historical context, past preferences, or cross-session learnings. Please proceed with standard default best practices.";
+      this.terminal?.appendOutput(`⚪ [Stateless Baseline Intercept] Blocked ${toolName}(): Hindsight is switched off`, 'warn');
+      return {
+        success: false,
+        disabled: true,
+        error: errorMsg,
+        count: 0,
+        results: [],
+        message: errorMsg
+      };
     }
 
     // 1. Tool Deduplication & Anti-Loop Interception
@@ -906,7 +1216,8 @@ export class AgentEngine {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         name: toolName,
-        arguments: toolArgs
+        arguments: toolArgs,
+        hindsight_enabled: this.hindsightEnabled !== false
       }),
       signal: this.abortController?.signal
     });
@@ -939,17 +1250,39 @@ export class AgentEngine {
         this.fileModifiedSinceView.add(modFile);
       }
       await this.fileTree?.refresh();
+
+      // Build real visual diff string for the code editor
+      let diffStr = null;
+      if (toolName === 'replace_file_content' && toolArgs.TargetContent && toolArgs.ReplacementContent) {
+        const removed = toolArgs.TargetContent.split('\n').map(l => '-' + l).join('\n');
+        const added = toolArgs.ReplacementContent.split('\n').map(l => '+' + l).join('\n');
+        diffStr = `--- ${modFile} (original)\n+++ ${modFile} (modified)\n${removed}\n${added}`;
+      } else if (toolName === 'write_to_file' && toolArgs.CodeContent) {
+        diffStr = `+++ ${modFile} (new file)\n` + toolArgs.CodeContent.split('\n').map(l => '+' + l).join('\n');
+      }
+
       if (this.codeEditor && toolArgs.TargetFile && !toolArgs.TargetFile.endsWith('.png')) {
-        this.codeEditor.loadFile(toolArgs.TargetFile);
+        // Force reload so it ALWAYS fetches the new content from disk and displays the active diff!
+        this.codeEditor.loadFile(toolArgs.TargetFile, diffStr, true);
       }
       if (toolArgs.TargetFile && !toolArgs.TargetFile.endsWith('.md')) {
+        this.activeRuntimeErrors.clear();
         if (typeof window !== 'undefined' && window.fraidayApp) {
           window.fraidayApp.reloadPreview();
         }
       }
     } else if (toolName === 'browser_subagent') {
+      const errs = result.console_errors || [];
+      if (errs.length > 0) {
+        errs.forEach(err => this.activeRuntimeErrors.set(err, { message: err }));
+        this.terminal?.appendOutput(`✕ Headless Chrome verification detected ${errs.length} runtime error(s):\n  • ` + errs.join('\n  • '), 'error');
+      } else {
+        this.activeRuntimeErrors.clear();
+      }
       if (result.screenshot_url) {
-        this.terminal?.appendOutput(`✔ Headless Chrome certified live render: "${result.title}" (${result.dom_elements_count || 0} DOM elements)`, 'success');
+        if (errs.length === 0) {
+          this.terminal?.appendOutput(`✔ Headless Chrome certified clean live render: "${result.title}" (${result.dom_elements_count || 0} DOM elements, 0 console errors)`, 'success');
+        }
         if (typeof window !== 'undefined' && window.fraidayApp) {
           window.fraidayApp.reloadPreview();
         }
@@ -1024,13 +1357,57 @@ export class AgentEngine {
     this.fileModifiedSinceView = new Set();
 
     this.setState('planning');
+    if (this.dagCanvas && typeof this.dagCanvas.setActiveStage === 'function') {
+      this.dagCanvas.setActiveStage('goal_intake', `Objective: "${this.currentGoal}"`);
+    }
 
     // Multi-turn conversational memory: preserve history across user messages
+    const baseSystemPrompt = this.hindsightEnabled !== false 
+      ? ANTIGRAVITY_SYSTEM_PROMPT 
+      : STATELESS_BASELINE_SYSTEM_PROMPT;
+
     if (!this.conversationHistory || this.conversationHistory.length === 0) {
       this.conversationHistory = [
-        { role: 'system', content: ANTIGRAVITY_SYSTEM_PROMPT }
+        { role: 'system', content: baseSystemPrompt }
       ];
+    } else if (this.conversationHistory[0]?.role === 'system') {
+      this.conversationHistory[0].content = baseSystemPrompt;
     }
+
+    // 🧠 Vectorize Hindsight: Automatic Pre-Execution Memory Recall
+    if (this.hindsightEnabled !== false) {
+      try {
+        const recallResp = await fetch(`${this.apiBase}/api/hindsight/recall`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: this.currentGoal })
+        });
+        if (recallResp.ok) {
+          const recallData = await recallResp.json();
+          if (recallData.results && recallData.results.length > 0) {
+            this.lastRecalledMemories = recallData.results;
+            if (this.onHindsightRecall) {
+              this.onHindsightRecall(recallData);
+            }
+            this.terminal?.appendOutput(`🧠 [Hindsight Recall] Recalled ${recallData.results.length} memories & rules for: "${this.currentGoal}"`, 'info');
+            if (recallData.prompt_string) {
+              this.conversationHistory[0].content = ANTIGRAVITY_SYSTEM_PROMPT + "\n\n" + recallData.prompt_string;
+            }
+          } else {
+            this.conversationHistory[0].content = ANTIGRAVITY_SYSTEM_PROMPT;
+          }
+        }
+      } catch (memErr) {
+        console.warn('Hindsight recall warning:', memErr);
+      }
+    } else {
+      this.terminal?.appendOutput(`⚪ [Stateless Baseline Mode] Vectorize Hindsight disabled: operating as standard blank-slate LLM without memory recall or retention.`, 'warn');
+      this.conversationHistory[0].content = STATELESS_BASELINE_SYSTEM_PROMPT;
+      if (this.onHindsightRecall) {
+        this.onHindsightRecall({ count: 0, results: [], prompt_string: '', disabled: true });
+      }
+    }
+
     this.conversationHistory.push({
       role: 'user',
       content: `<USER_REQUEST>\n${this.currentGoal}\n</USER_REQUEST>`
@@ -1042,6 +1419,12 @@ export class AgentEngine {
     if (this.onUserMessage) {
       this.onUserMessage(this.currentGoal);
     }
+    this.recordTimelineEvent({
+      type: 'user_message',
+      text: this.currentGoal,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    });
+    this.saveSession();
 
     this.streamThought(`Analyzing objective: "${this.currentGoal}"\nInitiating Antigravity Autonomous Lifecycle Engine...`);
     await this.runExecutionLoop();
@@ -1057,7 +1440,7 @@ export class AgentEngine {
 
       let respData = null;
       try {
-        respData = await this.callLlmRaw(this.conversationHistory, ANTIGRAVITY_TOOLS);
+        respData = await this.callLlmRaw(this.conversationHistory, this.getActiveTools());
       } catch (err) {
         if (this.isAborted) break;
         console.error('LLM Gateway Invocation Error:', err);
@@ -1077,7 +1460,7 @@ export class AgentEngine {
             error: errMsg,
             reason: errMsg,
             advice: errMsg.includes('429')
-              ? 'API rate limit or daily token limit reached. Switch provider (e.g. Cerebras, NVIDIA NIM, OpenAI) or choose another model preset in Settings ⚙️.'
+              ? 'API rate limit or daily token limit reached. Switch provider (e.g. NVIDIA NIM, Groq, OpenAI) or choose another model preset in Settings ⚙️.'
               : 'The AI model gateway could not complete the request. Verify your API key or network connection in Settings ⚙️.'
           });
         }
@@ -1151,6 +1534,17 @@ export class AgentEngine {
           continue;
         }
 
+        // STRICT VERIFICATION CHECK: Disallow completion if application has active runtime errors
+        if (this.activeRuntimeErrors && this.activeRuntimeErrors.size > 0) {
+          const errList = Array.from(this.activeRuntimeErrors.keys()).join('; ');
+          this.terminal?.appendOutput(`⚠️ Cannot declare completion: Active runtime errors remaining in preview: ${errList}. Continuing execution to resolve defects...`, 'warn');
+          this.conversationHistory.push({
+            role: 'user',
+            content: `[VERIFICATION FAILURE]: The application has active runtime errors: [${errList}]. You MUST diagnose the issue, use replace_file_content to fix it, and verify that browser_subagent reports 0 errors before completing.`
+          });
+          continue;
+        }
+
         // Both code, headless browser audit, and walkthrough.md are complete!
         this.setState('completed');
         this.terminal?.appendOutput(`═══════════════════════════════════════════════════════════════`, 'success');
@@ -1160,12 +1554,43 @@ export class AgentEngine {
         this.terminal?.appendOutput(`   • Artifact: walkthrough.md Generated`, 'success');
         this.terminal?.appendOutput(`═══════════════════════════════════════════════════════════════`, 'success');
 
+        // 🧠 Vectorize Hindsight: Automatically Retain Task Completion & Certified Solution
+        if (this.hindsightEnabled !== false) {
+          try {
+            const retainPayload = {
+              memory_type: 'experience_fact',
+              content: `Successfully completed objective: "${this.currentGoal}". Code files certified with zero errors and walkthrough.md generated.`,
+              metadata: {
+                title: `Task Certified: ${this.currentGoal.slice(0, 45)}`,
+                status: 'completed',
+                turn_count: this.turnCount
+              },
+              tags: ['task_completed', 'certified_execution']
+            };
+            fetch(`${this.apiBase}/api/hindsight/retain`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(retainPayload)
+            }).then(r => r.json()).then(res => {
+              this.terminal?.appendOutput(`🧠 [Hindsight Retain] Retained task outcome into memory bank`, 'info');
+              if (this.onHindsightRetain) this.onHindsightRetain(res);
+            }).catch(() => {});
+          } catch (_) {}
+        }
+
+        const respText = content || 'Mission Accomplished! All files created, verified in headless Chrome, and documented in walkthrough.md.';
+        this.recordTimelineEvent({
+          type: 'agent_message',
+          markdown: respText,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        });
         if (this.onAgentResponse) {
-          this.onAgentResponse(content || 'Mission Accomplished! All files created, verified in headless Chrome, and documented in walkthrough.md.');
+          this.onAgentResponse(respText);
         }
         if (this.onExecutionEnd) {
           this.onExecutionEnd({ success: true });
         }
+        this.saveSession();
         if (typeof window !== 'undefined' && window.fraidayApp) {
           window.fraidayApp.reloadPreview();
           window.fraidayApp.switchTab('preview');
@@ -1177,7 +1602,18 @@ export class AgentEngine {
       for (const call of toolCalls) {
         if (this.isAborted) break;
 
-        const toolName = call.function?.name;
+        let toolName = (call.function?.name || '').trim();
+        // Normalize tool aliases emitted by various LLMs (e.g. DeepSeek Web calls _web for web search)
+        if (toolName === '_web' || toolName === 'web_search' || toolName === '_search' || toolName === 'web' || toolName === 'search') {
+          toolName = 'search_web';
+        } else if (toolName === 'write_file' || toolName === 'create_file' || toolName === 'new_file') {
+          toolName = 'write_to_file';
+        } else if (toolName === 'read_file' || toolName === 'cat' || toolName === 'open_file') {
+          toolName = 'view_file';
+        } else if (toolName === 'execute_command' || toolName === 'shell_command' || toolName === 'bash' || toolName === 'terminal') {
+          toolName = 'run_command';
+        }
+
         let toolArgs = {};
         try {
           toolArgs = typeof call.function?.arguments === 'string' 
@@ -1187,7 +1623,41 @@ export class AgentEngine {
           toolArgs = {};
         }
 
+        // Normalize argument keys
+        if (toolName === 'search_web') {
+          toolArgs.query = toolArgs.query || toolArgs.Query || toolArgs.q || toolArgs.search_query || '';
+        } else if (toolName === 'write_to_file' || toolName === 'replace_file_content') {
+          toolArgs.TargetFile = toolArgs.TargetFile || toolArgs.path || toolArgs.file || '';
+          if (toolName === 'write_to_file' && !toolArgs.CodeContent && toolArgs.content) {
+            toolArgs.CodeContent = toolArgs.content;
+          }
+        } else if (toolName === 'view_file') {
+          toolArgs.AbsolutePath = toolArgs.AbsolutePath || toolArgs.TargetFile || toolArgs.path || toolArgs.file || '';
+        } else if (toolName === 'run_command') {
+          toolArgs.CommandLine = toolArgs.CommandLine || toolArgs.command || toolArgs.cmd || '';
+        }
+
         const toolCard = this.addAntigravityToolCard(toolName, toolArgs);
+
+        // STRICT STATELESS BASELINE GATE: Memory tools blocked when Hindsight is disabled
+        if ((toolName === 'recall_memory' || toolName === 'retain_memory' || toolName === 'reflect_memory') && this.hindsightEnabled === false) {
+          const blockedResult = {
+            success: false,
+            disabled: true,
+            error: "HINDSIGHT MEMORY IS SWITCHED OFF: Stateless Baseline Demo Mode is active. Memory recall, retention, and reflection are strictly disabled. The agent must proceed without past memories or saved preferences.",
+            count: 0,
+            results: []
+          };
+          this.terminal?.appendOutput(`⚪ [Stateless Baseline] Blocked ${toolName}(): Hindsight is switched off`, 'warn');
+          this.updateToolCard(toolCard, 'error', 'Stateless Baseline: Memory Disabled', blockedResult);
+          this.conversationHistory.push({
+            role: 'tool',
+            tool_call_id: call.id,
+            name: call.function?.name || toolName,
+            content: JSON.stringify(blockedResult)
+          });
+          continue;
+        }
 
         // STRICT PLANNING GATE: Disallow writing code files before plan is approved
         const isPlanFile = (toolArgs.TargetFile || '').toLowerCase().includes('implementation_plan.md');
@@ -1201,21 +1671,32 @@ export class AgentEngine {
           this.conversationHistory.push({
             role: 'tool',
             tool_call_id: call.id,
-            name: toolName,
+            name: call.function?.name || toolName,
             content: JSON.stringify(blockedResult)
           });
           continue;
         }
 
-        // STRICT WALKTHROUGH GATE: Disallow writing walkthrough.md until code exists and browser audit has run
+        // STRICT WALKTHROUGH GATE: Disallow writing walkthrough.md until code exists, browser audit has run, and ZERO errors remain
         if (toolName === 'write_to_file' && isWalkthroughFile) {
           const hasCode = this.checkCodeCreated();
           const hasBrowserAudit = this.conversationHistory.some(m => m.name === 'browser_subagent' || (m.role === 'tool' && (m.content || '').includes('browser_subagent')));
-          if (!hasCode || !hasBrowserAudit) {
+          const hasActiveErrors = this.activeRuntimeErrors && this.activeRuntimeErrors.size > 0;
+
+          if (!hasCode || !hasBrowserAudit || hasActiveErrors) {
+            let reason = "";
+            if (!hasCode) {
+              reason = "Application code files (index.html, style.css, app.js) have not been created yet.";
+            } else if (!hasBrowserAudit) {
+              reason = "Headless Chrome verification (browser_subagent) has not been performed yet. You must audit the live render before generating walkthrough.md.";
+            } else if (hasActiveErrors) {
+              const errList = Array.from(this.activeRuntimeErrors.keys()).join('; ');
+              reason = `The application has active runtime errors that MUST be fixed: [${errList}]. Use view_file to inspect, replace_file_content to patch code, and browser_subagent to verify clean execution with 0 errors before generating walkthrough.md.`;
+            }
             const blockedResult = {
-              error: "LIFECYCLE ENFORCEMENT: walkthrough.md can ONLY be created at the very end after all application code files (index.html, style.css, app.js) are written AND verified in headless Chrome via browser_subagent. Please write your code files and run browser_subagent verification first."
+              error: `LIFECYCLE ENFORCEMENT BLOCKED walkthrough.md: ${reason}`
             };
-            this.updateToolCard(toolCard, 'error', 'Blocked: Verification required before walkthrough');
+            this.updateToolCard(toolCard, 'error', `Blocked: ${reason}`);
             this.conversationHistory.push({
               role: 'tool',
               tool_call_id: call.id,
@@ -1229,7 +1710,13 @@ export class AgentEngine {
         let toolResult = null;
         try {
           toolResult = await this.executeToolCall(toolName, toolArgs, toolCard);
-          this.updateToolCard(toolCard, 'success', this.formatToolResultSummary(toolName, toolResult), toolResult);
+          const isCardSuccess = !toolResult?.disabled && toolResult?.success !== false;
+          this.updateToolCard(
+            toolCard, 
+            isCardSuccess ? 'success' : 'error', 
+            this.formatToolResultSummary(toolName, toolResult), 
+            toolResult
+          );
         } catch (err) {
           if (this.isAborted) break;
           toolResult = { error: err.message, exit_code: 1 };
@@ -1240,7 +1727,7 @@ export class AgentEngine {
         this.conversationHistory.push({
           role: 'tool',
           tool_call_id: call.id,
-          name: toolName,
+          name: call.function?.name || toolName,
           content: JSON.stringify(toolResult)
         });
 
@@ -1250,8 +1737,15 @@ export class AgentEngine {
             this.onArtifactPlanReady(toolArgs.CodeContent);
           }
           if (this.onPlanPendingApproval) {
+            this.recordTimelineEvent({
+              type: 'plan_approval',
+              planMarkdown: toolArgs.CodeContent,
+              approved: false,
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            });
             this.onPlanPendingApproval(toolArgs.CodeContent);
           }
+          this.saveSession();
           if (typeof document !== 'undefined') {
             const banner = document.getElementById('plan-approval-banner');
             const badge = document.getElementById('artifacts-badge');
@@ -1311,6 +1805,11 @@ export class AgentEngine {
           }
         }
       }
+
+      // Smooth pacing between autonomous turns to prevent Groq token-bucket rate limit spikes
+      if (toolCalls && toolCalls.length > 0 && !this.isAborted) {
+        await new Promise(r => setTimeout(r, 2200));
+      }
     }
 
     if (this.isAborted && this.onExecutionEnd) {
@@ -1360,6 +1859,9 @@ export class AgentEngine {
       this.planApprovalResolver = null;
       resolve({ approved: true });
     }
+    const lastPlan = [...(this.timelineEvents || [])].reverse().find(e => e.type === 'plan_approval');
+    if (lastPlan) lastPlan.approved = true;
+    this.saveSession();
   }
 
   rejectPlan(feedback = '') {
@@ -1387,6 +1889,13 @@ export class AgentEngine {
       this.planApprovalResolver = null;
       resolve({ approved: false, feedback });
     }
+    const lastPlan = [...(this.timelineEvents || [])].reverse().find(e => e.type === 'plan_approval');
+    if (lastPlan) {
+      lastPlan.approved = false;
+      lastPlan.rejected = true;
+      lastPlan.feedback = feedback;
+    }
+    this.saveSession();
   }
 
   async handleRuntimeError(errorData) {
@@ -1394,16 +1903,30 @@ export class AgentEngine {
     const now = Date.now();
     const msg = errorData.message.trim();
 
+    // 0. Ignore opaque/CORS script errors, unknown errors, or line 0 errors that cannot be remediated
+    if (msg.toLowerCase().includes('script error') || msg.toLowerCase().includes('unknown runtime error') || errorData.lineno === 0) {
+      return;
+    }
+
+    // Always track active runtime errors so verification gates block false completions!
+    this.activeRuntimeErrors.set(msg, errorData);
+
+    // 0b. Do NOT trigger self-healing if agent is actively executing, planning, or waiting for user
+    if (this.state === 'executing' || this.state === 'planning' || this.state === 'waiting' || this.state === 'healing') {
+      console.warn('[frAIday Healing] Agent currently active (' + this.state + '). Error recorded in activeRuntimeErrors:', msg);
+      return;
+    }
+
     // 1. Debounce and concurrency guard: do not trigger multiple overlapping healing sessions
     if (this.isHealing) {
       console.warn('[frAIday Healing] Already diagnosing/healing. Skipping duplicate event:', msg);
       return;
     }
-    if (now - this.lastHealTime < 7000) {
+    if (now - this.lastHealTime < 20000) {
       console.warn('[frAIday Healing] Cooldown active. Skipping repeated trigger:', msg);
       return;
     }
-    if (msg === this.lastHealedError && (now - this.lastHealTime < 20000)) {
+    if (msg === this.lastHealedError && (now - this.lastHealTime < 60000)) {
       console.warn('[frAIday Healing] Same defect already addressed recently. Skipping:', msg);
       return;
     }
@@ -1454,9 +1977,13 @@ INSTRUCTIONS:
 4. Verify your fix using browser_subagent.
 5. DO NOT generate walkthrough.md until the fix is verified clean.`;
 
+    const baseSystemPrompt = this.hindsightEnabled !== false 
+      ? ANTIGRAVITY_SYSTEM_PROMPT 
+      : STATELESS_BASELINE_SYSTEM_PROMPT;
+
     if (!this.conversationHistory || this.conversationHistory.length === 0) {
       this.conversationHistory = [
-        { role: 'system', content: ANTIGRAVITY_SYSTEM_PROMPT }
+        { role: 'system', content: baseSystemPrompt }
       ];
     }
     this.conversationHistory.push({
@@ -1467,7 +1994,7 @@ INSTRUCTIONS:
     this.streamThought(`Autonomous Error Interceptor: Diagnosing "${errorData.message}"...`);
 
     let turns = 0;
-    const maxHealingTurns = 12;
+    const maxHealingTurns = 4;
 
     while (turns < maxHealingTurns) {
       if (this.isAborted) break;
@@ -1475,7 +2002,7 @@ INSTRUCTIONS:
 
       let respData = null;
       try {
-        respData = await this.callLlmRaw(this.conversationHistory, ANTIGRAVITY_TOOLS);
+        respData = await this.callLlmRaw(this.conversationHistory, this.getActiveTools());
       } catch (err) {
         console.error('Self-healing LLM error:', err);
         break;
@@ -1512,6 +2039,26 @@ INSTRUCTIONS:
 
         const toolCard = this.addAntigravityToolCard(toolName, toolArgs);
 
+        // Disallow memory tools during stateless baseline mode
+        if ((toolName === 'recall_memory' || toolName === 'retain_memory' || toolName === 'reflect_memory') && this.hindsightEnabled === false) {
+          const blockedResult = {
+            success: false,
+            disabled: true,
+            error: "HINDSIGHT MEMORY IS SWITCHED OFF: Stateless Baseline Demo Mode is active. Memory recall, retention, and reflection are strictly disabled.",
+            count: 0,
+            results: []
+          };
+          this.terminal?.appendOutput(`⚪ [Stateless Baseline] Blocked ${toolName}(): Hindsight is switched off`, 'warn');
+          this.updateToolCard(toolCard, 'error', 'Stateless Baseline: Memory Disabled', blockedResult);
+          this.conversationHistory.push({
+            role: 'tool',
+            tool_call_id: call.id,
+            name: call.function?.name || toolName,
+            content: JSON.stringify(blockedResult)
+          });
+          continue;
+        }
+
         // Disallow writing walkthrough.md during healing
         if (toolName === 'write_to_file' && (toolArgs.TargetFile || '').toLowerCase().includes('walkthrough.md')) {
           const blockedResult = { error: "Do not create walkthrough.md during error healing. Diagnose, patch, and verify with browser_subagent first." };
@@ -1528,7 +2075,13 @@ INSTRUCTIONS:
         let toolResult = null;
         try {
           toolResult = await this.executeToolCall(toolName, toolArgs, toolCard);
-          this.updateToolCard(toolCard, 'success', this.formatToolResultSummary(toolName, toolResult), toolResult);
+          const isCardSuccess = !toolResult?.disabled && toolResult?.success !== false;
+          this.updateToolCard(
+            toolCard, 
+            isCardSuccess ? 'success' : 'error', 
+            this.formatToolResultSummary(toolName, toolResult), 
+            toolResult
+          );
           if (toolName === 'browser_subagent' && (!toolResult.console_errors || toolResult.console_errors.length === 0)) {
             hasVerified = true;
           }

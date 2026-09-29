@@ -1,8 +1,9 @@
+import os
 import json
 import urllib.request
 import urllib.error
 
-API_KEY = "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"
+API_KEY = os.environ.get("GROQ_API_KEY", "")
 URL = "https://api.groq.com/openai/v1/chat/completions"
 
 tools = [

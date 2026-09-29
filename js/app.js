@@ -10,44 +10,29 @@ import { TerminalComponent } from './components/terminal.js';
 import { KnowledgeBase } from './agent/knowledge-base.js';
 import { SafetyPolicyManager } from './agent/safety-policy.js';
 import { AgentEngine } from './agent/agent-engine.js';
+import { HindsightInspector } from './components/hindsight-inspector.js';
 
 export const PROVIDER_PRESETS = {
   groq: {
     name: 'Groq LPU',
     keyHint: 'Groq Key (gsk_...)',
-    defaultKey: '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',
-    defaultModel: 'openai/gpt-oss-20b',
+    defaultKey: '',
+    defaultModel: 'openai/gpt-oss-120b',
     models: [
-      { id: 'openai/gpt-oss-20b', label: 'openai/gpt-oss-20b (Recommended · Active Quota · Fast)' },
-      { id: 'openai/gpt-oss-120b', label: 'openai/gpt-oss-120b (120B Reasoning · Daily Quota Monitored)' },
+      { id: 'openai/gpt-oss-120b', label: 'openai/gpt-oss-120b (120B Reasoning · Default)' },
       { id: 'qwen/qwen3.8-27b', label: 'qwen/qwen3.8-27b (Fast 27B LPU)' },
-      { id: 'llama-3.3-70b-versatile', label: 'llama-3.3-70b-versatile (Meta 70B)' },
-      { id: 'llama-3.1-8b-instant', label: 'llama-3.1-8b-instant (Lightweight Instant)' },
-      { id: 'custom', label: '⚙️ Custom Model Identifier...' }
-    ]
-  },
-  cerebras: {
-    name: 'Cerebras',
-    keyHint: 'Cerebras Key (csk-...)',
-    defaultKey: 'csk-xmdfvw9944fk9rxw2vjyctty5reynyvd2rntk2mewvy3ey9r',
-    defaultModel: 'gpt-oss-120b',
-    models: [
-      { id: 'gpt-oss-120b', label: 'gpt-oss-120b (Cerebras 120B)' },
-      { id: 'qwen-3.8-27b', label: 'qwen-3.8-27b (Qwen 27B)' },
-      { id: 'llama3.1-70b', label: 'llama3.1-70b (Llama 3.1 70B)' },
-      { id: 'llama3.1-8b', label: 'llama3.1-8b (Llama 3.1 8B)' },
+      { id: 'openai/gpt-oss-20b', label: 'openai/gpt-oss-20b (20B LPU)' },
       { id: 'custom', label: '⚙️ Custom Model Identifier...' }
     ]
   },
   nvidia: {
     name: 'NVIDIA NIM',
     keyHint: 'NVIDIA Key (nvapi-...)',
-    defaultKey: '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',
+    defaultKey: '',
     defaultModel: 'meta/llama-3.2-11b-vision-instruct',
     models: [
-      { id: 'meta/llama-3.2-11b-vision-instruct', label: 'meta/llama-3.2-11b-vision-instruct (Default)' },
-      { id: 'meta/llama-3.1-70b-instruct', label: 'meta/llama-3.1-70b-instruct' },
-      { id: 'meta/llama-3.1-8b-instruct', label: 'meta/llama-3.1-8b-instruct' },
+      { id: 'meta/llama-3.2-11b-vision-instruct', label: 'meta/llama-3.2-11b-vision-instruct (Default · Fast)' },
+      { id: 'meta/llama-3.2-90b-vision-instruct', label: 'meta/llama-3.2-90b-vision-instruct (High Intelligence)' },
       { id: 'custom', label: '⚙️ Custom Model Identifier...' }
     ]
   },
@@ -81,6 +66,8 @@ class AppCoordinator {
   constructor() {
     this.activeTab = 'preview'; // 'preview', 'code', 'dag', 'terminal'
     this.currentPreviewUrl = '/workspace/index.html';
+    this.activeWorkspace = 'default';
+    this.workspacesList = [];
   }
 
   async init() {
@@ -166,6 +153,41 @@ class AppCoordinator {
       }
     });
 
+    // Initialize Vectorize Hindsight Visual Memory Inspector
+    const hindsightContainer = document.getElementById('hindsight-canvas-container');
+    this.hindsightInspector = new HindsightInspector(hindsightContainer, {
+      apiBase: '',
+      onToggleMode: (enabled) => {
+        if (this.agentEngine?.setHindsightMode) {
+          this.agentEngine.setHindsightMode(enabled);
+        } else if (this.agentEngine) {
+          this.agentEngine.hindsightEnabled = enabled;
+        }
+        this.updateHindsightHudPill(enabled);
+      },
+      onRunScenario: (prompt, hindsightEnabled) => {
+        const inputEl = document.getElementById('chat-prompt-input');
+        if (inputEl) {
+          inputEl.value = prompt;
+          inputEl.focus();
+        }
+        this.switchTab('hindsight');
+        const runBtn = document.getElementById('btn-run-mission');
+        if (runBtn) {
+          runBtn.click();
+        }
+      }
+    });
+
+    // Wire agentEngine hindsight callbacks
+    this.agentEngine.onHindsightRecall = (recallData) => {
+      this.hindsightInspector.handleRecallEvent(recallData);
+      this.updateHindsightHudPill(this.agentEngine.hindsightEnabled !== false, recallData.count);
+    };
+    this.agentEngine.onHindsightRetain = (retainData) => {
+      this.hindsightInspector.handleRetainEvent(retainData);
+      this.updateHindsightHudPill(this.agentEngine.hindsightEnabled !== false);
+    };
 
     // 2. Setup DOM Events
     this.bindHudControls();
@@ -176,10 +198,65 @@ class AppCoordinator {
     this.bindContextualInput();
     this.bindPlanApprovalControls();
 
+    // Initial HUD update respecting stored hindsight mode
+    setTimeout(() => {
+      this.updateHindsightHudPill(this.agentEngine.hindsightEnabled !== false);
+      this.renderSidebarHindsightQuickView();
+    }, 500);
+
     // 3. Initial Load from Backend & Configuration Sync
+    await this.fetchWorkspaces();
     await this.fileTree.refresh();
     this.reloadPreview();
     await this.syncInitialConfig();
+    await this.rehydrateSession();
+  }
+
+  updateHindsightHudPill(enabled, lastCount = null) {
+    const pill = document.getElementById('hud-hindsight-pill');
+    const label = document.getElementById('hud-hindsight-label');
+    if (!pill || !label) return;
+
+    if (!enabled) {
+      pill.style.background = 'rgba(239, 68, 68, 0.15)';
+      pill.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+      label.style.color = '#f87171';
+      label.innerText = 'Stateless Baseline (Memory Off)';
+    } else {
+      pill.style.background = 'rgba(56, 189, 248, 0.12)';
+      pill.style.borderColor = 'rgba(56, 189, 248, 0.35)';
+      label.style.color = '#38bdf8';
+      const stats = this.hindsightInspector?.bankStatus?.stats;
+      const count = stats?.total ?? 10;
+      label.innerText = lastCount !== null ? `Hindsight: Recalled ${lastCount} (Bank: ${count})` : `Hindsight: Active (${count} Mems)`;
+    }
+  }
+
+  renderSidebarHindsightQuickView() {
+    const el = document.getElementById('sidebar-hindsight-quickview');
+    if (!el) return;
+    const stats = this.hindsightInspector?.bankStatus?.stats || {
+      mental_models: 3, observations: 3, experience_facts: 2, world_facts: 2, total: 10
+    };
+    el.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:10px;font-size:12px;">
+        <div style="background:rgba(22,32,50,0.6);border:1px solid rgba(56,189,248,0.2);border-radius:8px;padding:12px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <span style="font-weight:700;color:#f8fafc;">Active Bank</span>
+            <span style="font-size:10px;color:#38bdf8;background:rgba(56,189,248,0.15);padding:2px 6px;border-radius:4px;">TEMPR Hybrid</span>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:11px;color:#cbd5e1;">
+            <div>🧠 Mental Models: <strong style="color:#c084fc;">${stats.mental_models}</strong></div>
+            <div>🔍 Observations: <strong style="color:#38bdf8;">${stats.observations}</strong></div>
+            <div>⚡ Incidents: <strong style="color:#fcd34d;">${stats.experience_facts}</strong></div>
+            <div>🌐 World Facts: <strong style="color:#94a3b8;">${stats.world_facts}</strong></div>
+          </div>
+        </div>
+        <button class="btn btn-primary btn-sm" style="width:100%;" onclick="window.fraidayApp?.switchTab('hindsight')">
+          Open Full Memory Explorer ↗
+        </button>
+      </div>
+    `;
   }
 
   switchTab(tabKey) {
@@ -191,10 +268,20 @@ class AppCoordinator {
       view.classList.toggle('active', view.getAttribute('data-view') === tabKey);
     });
 
+    if (tabKey === 'hindsight') {
+      this.hindsightInspector?.refreshData();
+    }
+
     if (tabKey === 'terminal') {
       const termInput = document.getElementById('term-user-input');
       if (termInput) {
         setTimeout(() => termInput.focus(), 50);
+      }
+    }
+
+    if (tabKey === 'dag') {
+      if (this.dagCanvas && typeof this.dagCanvas.render === 'function') {
+        this.dagCanvas.render();
       }
     }
 
@@ -241,6 +328,7 @@ class AppCoordinator {
         if (titleEl) {
           const titles = {
             files: 'Workspace Explorer',
+            hindsight: 'Vectorize Hindsight Memory Bank',
             knowledge: 'Discovered Docs & RFCs',
             skills: 'MCP Tooling & Skills',
             safety: 'Execution Policies'
@@ -312,11 +400,116 @@ class AppCoordinator {
       });
     }
 
-    // Listen for runtime errors emitted from preview iframe for autonomous self-healing
+    // Live Preview DevTools Console Drawer
+    const consoleDrawer = document.getElementById('preview-console-drawer');
+    const toggleConsoleBtn = document.getElementById('btn-toggle-console-drawer');
+    const clearConsoleBtn = document.getElementById('btn-clear-console');
+    const refreshConsoleBtn = document.getElementById('btn-refresh-console');
+    const consoleBody = document.getElementById('preview-console-body');
+    const consoleLogCount = document.getElementById('console-log-count');
+    const consoleWarnCount = document.getElementById('console-warn-count');
+    const consoleErrorCount = document.getElementById('console-error-count');
+    const consoleEmptyMsg = document.getElementById('console-empty-msg');
+
+    this.consoleLogs = [];
+    this.consoleCounts = { log: 0, warn: 0, error: 0 };
+
+    const updateConsoleBadges = () => {
+      if (consoleLogCount) consoleLogCount.innerText = `${this.consoleCounts.log} logs`;
+      if (consoleWarnCount) {
+        consoleWarnCount.innerText = `${this.consoleCounts.warn} warnings`;
+        consoleWarnCount.style.display = this.consoleCounts.warn > 0 ? 'inline-block' : 'none';
+      }
+      if (consoleErrorCount) {
+        consoleErrorCount.innerText = `${this.consoleCounts.error} errors`;
+        consoleErrorCount.style.display = this.consoleCounts.error > 0 ? 'inline-block' : 'none';
+      }
+    };
+
+    this.clearPreviewConsole = (reason = 'cleared') => {
+      this.consoleLogs = [];
+      this.consoleCounts = { log: 0, warn: 0, error: 0 };
+      this._lastTerminalErrors = new Map();
+      if (consoleBody) {
+        const msg = reason === 'reload'
+          ? '<div class="console-empty" id="console-empty-msg">🔄 Console refreshed for active preview. 0 errors.</div>'
+          : '<div class="console-empty" id="console-empty-msg">Console cleared.</div>';
+        consoleBody.innerHTML = msg;
+      }
+      updateConsoleBadges();
+      if (this.agentEngine && this.agentEngine.activeRuntimeErrors) {
+        this.agentEngine.activeRuntimeErrors.clear();
+      }
+    };
+
+    if (toggleConsoleBtn && consoleDrawer) {
+      toggleConsoleBtn.addEventListener('click', () => {
+        const isCollapsed = consoleDrawer.classList.toggle('collapsed');
+        toggleConsoleBtn.innerText = isCollapsed ? '▲ Console' : '▼ Console';
+      });
+    }
+
+    if (clearConsoleBtn) {
+      clearConsoleBtn.addEventListener('click', () => {
+        this.clearPreviewConsole('manual');
+      });
+    }
+
+    if (refreshConsoleBtn) {
+      refreshConsoleBtn.addEventListener('click', () => {
+        this.reloadPreview();
+      });
+    }
+
+    const appendConsoleLog = (level, args, timestamp) => {
+      const emptyEl = document.getElementById('console-empty-msg');
+      if (emptyEl) emptyEl.remove();
+
+      const lvl = level || 'log';
+      if (lvl === 'error') this.consoleCounts.error++;
+      else if (lvl === 'warn') this.consoleCounts.warn++;
+      else this.consoleCounts.log++;
+      updateConsoleBadges();
+
+      const item = document.createElement('div');
+      item.className = `console-log-item ${lvl}`;
+      const timeStr = timestamp || new Date().toLocaleTimeString();
+      const text = Array.isArray(args) ? args.join(' ') : String(args);
+      item.innerHTML = `
+        <span class="log-time">${timeStr}</span>
+        <span class="log-level">${lvl}</span>
+        <span class="log-text">${this.escapeInlineMd(text)}</span>
+      `;
+      if (consoleBody) {
+        consoleBody.appendChild(item);
+        consoleBody.scrollTop = consoleBody.scrollHeight;
+      }
+      this.consoleLogs.push({ level: lvl, args, timestamp: timeStr });
+    };
+
+    // Listen for runtime errors & console logs emitted from preview iframe
     window.addEventListener('message', (event) => {
+      if (event.data && event.data.type === 'WORKSPACE_PREVIEW_RELOADED') {
+        this.clearPreviewConsole('reload');
+      }
+      if (event.data && event.data.type === 'WORKSPACE_CONSOLE_LOG') {
+        const { level, args, timestamp } = event.data;
+        appendConsoleLog(level, args, timestamp);
+      }
       if (event.data && event.data.type === 'WORKSPACE_RUNTIME_ERROR') {
-        const { message, filename, lineno, colno } = event.data;
-        this.terminal.appendOutput(`⚠️ [Workspace Runtime Error] ${message} (${filename ? filename + ':' + lineno : 'line ' + lineno})`, 'error');
+        const { message, filename, lineno, colno, isConsoleError } = event.data;
+        if (!isConsoleError) {
+          appendConsoleLog('error', [`Runtime Error: ${message}`, filename ? `at ${filename}:${lineno}` : '']);
+        }
+        if (message && message !== 'Script error.' && message !== 'Unknown runtime error' && lineno !== 0) {
+          const errKey = `${message}:${filename}:${lineno}`;
+          const now = Date.now();
+          if (!this._lastTerminalErrors) this._lastTerminalErrors = new Map();
+          if (!this._lastTerminalErrors.has(errKey) || (now - this._lastTerminalErrors.get(errKey) > 10000)) {
+            this._lastTerminalErrors.set(errKey, now);
+            this.terminal.appendOutput(`⚠️ [Workspace Runtime Error] ${message} (${filename ? filename + ':' + lineno : 'line ' + lineno})`, 'error');
+          }
+        }
         if (this.agentEngine && typeof this.agentEngine.handleRuntimeError === 'function') {
           this.agentEngine.handleRuntimeError(event.data);
         }
@@ -380,6 +573,7 @@ class AppCoordinator {
   }
 
   reloadPreview(preferredHtmlPath = null) {
+    if (this.clearPreviewConsole) this.clearPreviewConsole('reload');
     const iframe = document.getElementById('live-preview-frame');
     const emptyState = document.getElementById('preview-empty-state');
     if (!iframe) return;
@@ -422,7 +616,354 @@ class AppCoordinator {
       .catch(() => {});
   }
 
+  async fetchWorkspaces() {
+    try {
+      const res = await fetch('/api/workspaces').then(r => r.json());
+      if (res && res.workspaces) {
+        this.activeWorkspace = res.active_workspace || 'default';
+        this.workspacesList = res.workspaces || [];
+        this.updateWorkspaceDisplay(this.activeWorkspace, res.active_path);
+        this.renderWorkspaceDropdown();
+      }
+    } catch (err) {
+      console.warn('Failed to fetch workspaces:', err);
+    }
+  }
+
+  updateWorkspaceDisplay(name, activePath = null) {
+    const hudName = document.getElementById('hud-active-workspace-name');
+    if (hudName) hudName.innerText = name;
+    const sidebarBadge = document.getElementById('sidebar-active-workspace-badge');
+    if (sidebarBadge) sidebarBadge.innerText = name;
+    if (this.agentEngine?.setWorkspace) {
+      this.agentEngine.setWorkspace(name);
+    }
+    if (this.terminal?.setWorkspace) {
+      this.terminal.setWorkspace(name, activePath);
+    }
+  }
+
+  renderWorkspaceDropdown() {
+    const listEl = document.getElementById('workspace-list-container');
+    if (!listEl) return;
+
+    if (!this.workspacesList || this.workspacesList.length === 0) {
+      listEl.innerHTML = '<div style="color:#64748b;font-size:11px;padding:8px;text-align:center;">No workspaces found</div>';
+      return;
+    }
+
+    listEl.innerHTML = this.workspacesList.map(ws => {
+      const isActive = ws.name === this.activeWorkspace;
+      return `
+        <div class="workspace-item ${isActive ? 'active' : ''}" data-name="${this.escapeInlineMd(ws.name)}" style="display:flex;align-items:center;justify-content:space-between;padding:7px 10px;border-radius:6px;cursor:pointer;background:${isActive ? 'rgba(56,189,248,0.12)' : 'rgba(255,255,255,0.02)'};border:1px solid ${isActive ? 'rgba(56,189,248,0.4)' : 'rgba(255,255,255,0.05)'};">
+          <div style="display:flex;align-items:center;gap:8px;overflow:hidden;flex:1;">
+            <span style="font-size:13px;">${isActive ? '📁' : '📂'}</span>
+            <div style="overflow:hidden;">
+              <div style="font-weight:${isActive ? '700' : '500'};color:${isActive ? '#38bdf8' : '#e2e8f0'};font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                ${this.escapeInlineMd(ws.name)}
+                ${isActive ? '<span style="font-size:9.5px;background:#38bdf8;color:#0f172a;font-weight:700;padding:1px 5px;border-radius:3px;margin-left:5px;">ACTIVE</span>' : ''}
+              </div>
+              <div style="font-size:10.5px;color:#64748b;font-family:var(--font-mono);margin-top:1px;">
+                ${ws.file_count !== undefined ? `${ws.file_count} files` : ''} · ${this.escapeInlineMd(ws.rel_path || ws.name)}
+              </div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:4px;" onclick="event.stopPropagation();">
+            ${ws.name !== 'default' ? `
+              <button class="btn btn-icon btn-xs ws-btn-delete" data-name="${this.escapeInlineMd(ws.name)}" title="Delete workspace ${this.escapeInlineMd(ws.name)}" style="color:#ef4444;background:transparent;border:none;padding:2px 5px;font-size:11px;cursor:pointer;">
+                🗑️
+              </button>
+            ` : ''}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    // Bind click events on rows
+    listEl.querySelectorAll('.workspace-item').forEach(item => {
+      item.addEventListener('click', async () => {
+        const name = item.getAttribute('data-name');
+        if (name && name !== this.activeWorkspace) {
+          await this.switchWorkspace(name);
+        }
+      });
+    });
+
+    // Bind delete events
+    listEl.querySelectorAll('.ws-btn-delete').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const name = btn.getAttribute('data-name');
+        if (name) {
+          await this.deleteWorkspace(name);
+        }
+      });
+    });
+  }
+
+  async switchWorkspace(name) {
+    if (!name || name === this.activeWorkspace) {
+      this.closeWorkspaceDropdown();
+      return;
+    }
+
+    try {
+      this.closeWorkspaceDropdown();
+      if (this.terminal) {
+        this.terminal.appendOutput(`🔄 Switching to workspace "${name}"...`, 'warn');
+      }
+
+      const res = await fetch('/api/workspaces/switch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
+      }).then(r => r.json());
+
+      if (!res.success) {
+        throw new Error(res.error || 'Failed to switch workspace');
+      }
+
+      this.activeWorkspace = res.active_workspace || name;
+      this.updateWorkspaceDisplay(this.activeWorkspace, res.active_path);
+
+      // Refresh list, files, editor, preview, and rehydrate session
+      await this.fetchWorkspaces();
+      await this.fileTree.refresh();
+      if (this.codeEditor) this.codeEditor.clear();
+      this.reloadPreview();
+
+      // Reset in-memory agent engine state and rehydrate workspace session
+      if (this.agentEngine) {
+        this.agentEngine.reset();
+        this.agentEngine.setWorkspace(this.activeWorkspace);
+      }
+      await this.rehydrateSession(true);
+
+      if (this.terminal) {
+        this.terminal.appendOutput(`✔ Active workspace is now "${this.activeWorkspace}" (${res.active_path || ''})`, 'success');
+      }
+    } catch (err) {
+      alert(`Could not switch workspace: ${err.message}`);
+      if (this.terminal) {
+        this.terminal.appendOutput(`❌ Failed to switch workspace: ${err.message}`, 'error');
+      }
+    }
+  }
+
+  async createWorkspace(name) {
+    const cleanName = (name || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+    if (!cleanName) {
+      alert('Please enter a valid workspace name (letters, numbers, hyphens).');
+      return;
+    }
+
+    try {
+      const btn = document.getElementById('btn-create-workspace-confirm');
+      if (btn) {
+        btn.disabled = true;
+        btn.innerText = 'Creating...';
+      }
+
+      const res = await fetch('/api/workspaces/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: cleanName })
+      }).then(r => r.json());
+
+      if (!res.success) {
+        throw new Error(res.error || 'Failed to create workspace');
+      }
+
+      this.activeWorkspace = res.active_workspace || cleanName;
+      this.updateWorkspaceDisplay(this.activeWorkspace, res.active_path);
+
+      // Hide input row and clear input
+      const inputRow = document.getElementById('new-workspace-input-row');
+      const input = document.getElementById('input-new-workspace-name');
+      if (inputRow) inputRow.style.display = 'none';
+      if (input) input.value = '';
+
+      this.closeWorkspaceDropdown();
+
+      await this.fetchWorkspaces();
+      await this.fileTree.refresh();
+      if (this.codeEditor) this.codeEditor.clear();
+      this.reloadPreview();
+
+      if (this.agentEngine) {
+        this.agentEngine.reset();
+        this.agentEngine.setWorkspace(this.activeWorkspace);
+      }
+      await this.rehydrateSession(true);
+
+      if (this.terminal) {
+        this.terminal.appendOutput(`✔ Created and activated workspace "${this.activeWorkspace}"`, 'success');
+      }
+    } catch (err) {
+      alert(`Could not create workspace: ${err.message}`);
+    } finally {
+      const btn = document.getElementById('btn-create-workspace-confirm');
+      if (btn) {
+        btn.disabled = false;
+        btn.innerText = 'Create & Switch';
+      }
+    }
+  }
+
+  async deleteWorkspace(name) {
+    if (!name || name === 'default') {
+      alert('Cannot delete the default workspace.');
+      return;
+    }
+
+    if (!confirm(`Are you sure you want to permanently delete workspace "${name}" and all its files? This cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/workspaces/delete', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
+      }).then(r => r.json());
+
+      if (!res.success) {
+        throw new Error(res.error || 'Failed to delete workspace');
+      }
+
+      if (this.terminal) {
+        this.terminal.appendOutput(`✔ Workspace "${name}" deleted.`, 'warn');
+      }
+
+      // If active workspace was deleted, backend automatically points to remaining or default
+      this.activeWorkspace = res.active_workspace || 'default';
+      this.updateWorkspaceDisplay(this.activeWorkspace, res.active_path);
+
+      await this.fetchWorkspaces();
+      await this.fileTree.refresh();
+      if (this.codeEditor) this.codeEditor.clear();
+      this.reloadPreview();
+
+      if (this.agentEngine) {
+        this.agentEngine.reset();
+        this.agentEngine.setWorkspace(this.activeWorkspace);
+      }
+      await this.rehydrateSession(true);
+    } catch (err) {
+      alert(`Could not delete workspace: ${err.message}`);
+    }
+  }
+
+  toggleWorkspaceDropdown() {
+    const menu = document.getElementById('workspace-dropdown-menu');
+    if (!menu) return;
+    const isVisible = menu.style.display !== 'none';
+    if (isVisible) {
+      this.closeWorkspaceDropdown();
+    } else {
+      this.openWorkspaceDropdown();
+    }
+  }
+
+  openWorkspaceDropdown() {
+    const menu = document.getElementById('workspace-dropdown-menu');
+    if (menu) {
+      menu.style.display = 'block';
+      this.fetchWorkspaces();
+    }
+  }
+
+  closeWorkspaceDropdown() {
+    const menu = document.getElementById('workspace-dropdown-menu');
+    if (menu) {
+      menu.style.display = 'none';
+    }
+    const inputRow = document.getElementById('new-workspace-input-row');
+    if (inputRow) {
+      inputRow.style.display = 'none';
+    }
+  }
+
   bindHudControls() {
+    // 0. Workspace Switcher Pill & Dropdown bindings
+    const wsPill = document.getElementById('hud-workspace-pill');
+    if (wsPill) {
+      wsPill.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.toggleWorkspaceDropdown();
+      });
+    }
+
+    const sidebarWsBadge = document.getElementById('sidebar-active-workspace-badge');
+    if (sidebarWsBadge) {
+      sidebarWsBadge.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.toggleWorkspaceDropdown();
+      });
+    }
+
+    const sidebarAddWsBtn = document.getElementById('btn-sidebar-add-workspace');
+    if (sidebarAddWsBtn) {
+      sidebarAddWsBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.openWorkspaceDropdown();
+        const inputRow = document.getElementById('new-workspace-input-row');
+        const input = document.getElementById('input-new-workspace-name');
+        if (inputRow) inputRow.style.display = 'block';
+        if (input) setTimeout(() => input.focus(), 50);
+      });
+    }
+
+    const showNewWsBtn = document.getElementById('btn-show-new-workspace');
+    if (showNewWsBtn) {
+      showNewWsBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const inputRow = document.getElementById('new-workspace-input-row');
+        const input = document.getElementById('input-new-workspace-name');
+        if (inputRow) inputRow.style.display = 'block';
+        if (input) setTimeout(() => input.focus(), 50);
+      });
+    }
+
+    const cancelNewWsBtn = document.getElementById('btn-cancel-new-workspace');
+    if (cancelNewWsBtn) {
+      cancelNewWsBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const inputRow = document.getElementById('new-workspace-input-row');
+        if (inputRow) inputRow.style.display = 'none';
+      });
+    }
+
+    const createWsConfirmBtn = document.getElementById('btn-create-workspace-confirm');
+    const wsInput = document.getElementById('input-new-workspace-name');
+    if (createWsConfirmBtn && wsInput) {
+      createWsConfirmBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.createWorkspace(wsInput.value);
+      });
+      wsInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          this.createWorkspace(wsInput.value);
+        } else if (e.key === 'Escape') {
+          const inputRow = document.getElementById('new-workspace-input-row');
+          if (inputRow) inputRow.style.display = 'none';
+        }
+      });
+    }
+
+    // Close workspace dropdown on outside click
+    document.addEventListener('click', (e) => {
+      const pillContainer = document.getElementById('workspace-pill-container');
+      const sidebarBadge = document.getElementById('sidebar-active-workspace-badge');
+      const sidebarAddBtn = document.getElementById('btn-sidebar-add-workspace');
+      if (pillContainer && !pillContainer.contains(e.target) &&
+          (!sidebarBadge || !sidebarBadge.contains(e.target)) &&
+          (!sidebarAddBtn || !sidebarAddBtn.contains(e.target))) {
+        this.closeWorkspaceDropdown();
+      }
+    });
+
     // Run Mission Button
     const runBtn = document.getElementById('btn-run-mission');
     const stopBtn = document.getElementById('btn-stop-execution');
@@ -450,6 +991,135 @@ class AppCoordinator {
     if (hudTermBtn) {
       hudTermBtn.addEventListener('click', () => {
         this.switchTab(this.activeTab === 'terminal' ? 'preview' : 'terminal');
+      });
+    }
+
+    // Export ZIP Button
+    const exportZipBtn = document.getElementById('btn-export-zip');
+    if (exportZipBtn) {
+      exportZipBtn.addEventListener('click', () => {
+        exportZipBtn.disabled = true;
+        exportZipBtn.innerHTML = '<span>⏳</span> <span>Exporting...</span>';
+        const a = document.createElement('a');
+        a.href = '/api/workspace/export-zip';
+        a.download = 'workspace.zip';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        this.terminal.appendOutput('✔ Entire workspace exported as workspace.zip', 'success');
+        setTimeout(() => {
+          exportZipBtn.disabled = false;
+          exportZipBtn.innerHTML = '<span>📦</span> <span>Export ZIP</span>';
+        }, 1500);
+      });
+    }
+
+    // Checkpoints Modal Controls
+    const checkpointsBtn = document.getElementById('btn-checkpoints');
+    const checkpointsModal = document.getElementById('checkpoints-modal');
+    const closeCheckpointsBtn = document.getElementById('btn-close-checkpoints');
+    const createCheckpointBtn = document.getElementById('btn-create-checkpoint');
+    const checkpointNameInput = document.getElementById('checkpoint-name-input');
+    const checkpointsList = document.getElementById('checkpoints-list');
+
+    const loadCheckpoints = async () => {
+      if (!checkpointsList) return;
+      checkpointsList.innerHTML = '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:15px;">Loading checkpoints...</div>';
+      try {
+        const res = await fetch('/api/workspace/checkpoints').then(r => r.json());
+        const list = res.checkpoints || [];
+        if (list.length === 0) {
+          checkpointsList.innerHTML = '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:15px;">No checkpoints created yet. Click "+ Create Checkpoint" above to save current workspace state.</div>';
+          return;
+        }
+        checkpointsList.innerHTML = list.map(cp => `
+          <div style="display:flex;align-items:center;justify-content:space-between;background:rgba(15,23,42,0.8);border:1px solid var(--border-medium);padding:10px 14px;border-radius:6px;">
+            <div>
+              <div style="font-weight:700;color:#f8fafc;font-size:12.5px;">${cp.name || cp.id}</div>
+              <div style="font-size:11px;color:#94a3b8;margin-top:2px;">
+                <span>⏱️ ${cp.timestamp || new Date(cp.created_at * 1000).toLocaleString()}</span>
+                ${cp.file_count ? ` · <span>${cp.file_count} files</span>` : ''}
+                ${cp.description ? ` · <em>${cp.description}</em>` : ''}
+              </div>
+            </div>
+            <button class="btn btn-secondary btn-sm btn-rollback-cp" data-id="${cp.id}" style="color:#38bdf8;border-color:rgba(56,189,248,0.4);white-space:nowrap;">
+              ↺ Rollback
+            </button>
+          </div>
+        `).join('');
+
+        checkpointsList.querySelectorAll('.btn-rollback-cp').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            const id = btn.getAttribute('data-id');
+            if (confirm(`Rollback workspace to checkpoint "${id}"? This will restore files to that snapshot.`)) {
+              btn.disabled = true;
+              btn.innerText = 'Restoring...';
+              try {
+                const rbRes = await fetch('/api/workspace/rollback', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ id })
+                }).then(r => r.json());
+                if (rbRes.success) {
+                  await this.fileTree.refresh();
+                  this.reloadPreview();
+                  if (this.codeEditor) {
+                    await this.codeEditor.reloadAllOpenTabs();
+                  }
+                  this.terminal.appendOutput(`✔ Workspace successfully rolled back to checkpoint "${id}" (${rbRes.restored_files} files restored).`, 'success');
+                  if (checkpointsModal) checkpointsModal.classList.remove('open');
+                } else {
+                  alert('Rollback failed: ' + (rbRes.error || 'Unknown error'));
+                }
+              } catch (err) {
+                alert('Rollback error: ' + err.message);
+              }
+            }
+          });
+        });
+      } catch (err) {
+        checkpointsList.innerHTML = `<div style="color:#f87171;font-size:12px;text-align:center;padding:15px;">Failed to load checkpoints: ${err.message}</div>`;
+      }
+    };
+
+    if (checkpointsBtn && checkpointsModal) {
+      checkpointsBtn.addEventListener('click', () => {
+        checkpointsModal.classList.add('open');
+        loadCheckpoints();
+      });
+    }
+
+    if (closeCheckpointsBtn && checkpointsModal) {
+      closeCheckpointsBtn.addEventListener('click', () => {
+        checkpointsModal.classList.remove('open');
+      });
+      checkpointsModal.addEventListener('click', (e) => {
+        if (e.target === checkpointsModal) checkpointsModal.classList.remove('open');
+      });
+    }
+
+    if (createCheckpointBtn && checkpointNameInput) {
+      createCheckpointBtn.addEventListener('click', async () => {
+        const name = checkpointNameInput.value.trim() || 'snapshot';
+        createCheckpointBtn.disabled = true;
+        createCheckpointBtn.innerText = 'Creating...';
+        try {
+          const res = await fetch('/api/workspace/checkpoint', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name })
+          }).then(r => r.json());
+          if (res.success) {
+            checkpointNameInput.value = '';
+            this.terminal.appendOutput(`✔ Checkpoint "${name}" created.`, 'success');
+            await loadCheckpoints();
+          }
+        } catch (err) {
+          alert('Failed to create checkpoint: ' + err.message);
+        } finally {
+          createCheckpointBtn.disabled = false;
+          createCheckpointBtn.innerText = '+ Create Checkpoint';
+        }
       });
     }
 
@@ -531,9 +1201,12 @@ class AppCoordinator {
           // 4. Reload preview (displays clean empty state)
           this.reloadPreview();
 
-          // 5. Reset agent engine & cockpit cards
+          // 5. Reset agent engine & cockpit cards & persistent session
           if (this.agentEngine && typeof this.agentEngine.reset === 'function') {
             this.agentEngine.reset();
+          }
+          if (this.agentEngine && typeof this.agentEngine.clearSession === 'function') {
+            await this.agentEngine.clearSession();
           }
 
           // 6. Reset prompt input and chat messages
@@ -603,6 +1276,36 @@ class AppCoordinator {
     }
   }
 
+  updateKeyHelperText(keyStr, provider = 'groq') {
+    const keyHelper = document.getElementById('key-helper-text');
+    if (!keyHelper) return;
+    const keys = (keyStr || '').split(/[,;\s]+/).map(k => k.trim()).filter(Boolean);
+    const count = keys.length;
+    if (provider === 'nvidia') {
+      keyHelper.innerHTML = `⚡ <strong>NVIDIA NIM Cloud Active</strong>: High-throughput inference powered by <code>meta/llama-3.2-11b-vision-instruct</code>.`;
+      keyHelper.style.color = '#38bdf8';
+    } else if (provider === 'groq') {
+      if (count > 1) {
+        keyHelper.innerHTML = `⚡ <strong>${count}-Key Auto-Rotation Active</strong>: ${count} Groq keys pooled for high token rate limits & zero-downtime failover!`;
+        keyHelper.style.color = '#38bdf8';
+      } else if (count === 1) {
+        keyHelper.innerHTML = `⚡ <strong>1 Key Active</strong>. Tip: Enter multiple keys separated by commas for multi-key pool rotation.`;
+        keyHelper.style.color = '#94a3b8';
+      } else {
+        keyHelper.innerHTML = `Enter one or more Groq API keys separated by commas.`;
+        keyHelper.style.color = '#94a3b8';
+      }
+    } else {
+      if (count > 1) {
+        keyHelper.innerHTML = `⚡ <strong>${count}-Key Auto-Rotation Active</strong>: Round-robin failover across ${count} keys.`;
+        keyHelper.style.color = '#38bdf8';
+      } else {
+        keyHelper.innerHTML = `Enter API key for ${provider.toUpperCase()}.`;
+        keyHelper.style.color = '#94a3b8';
+      }
+    }
+  }
+
   handleProviderChange(newProvider) {
     const keyInput = document.getElementById('setting-api-key');
     const modelInput = document.getElementById('setting-model');
@@ -612,15 +1315,22 @@ class AppCoordinator {
     const config = PROVIDER_PRESETS[newProvider] || PROVIDER_PRESETS.groq;
 
     // 1. Restore saved key for this provider or default key
-    const savedKey = localStorage.getItem(`fraiday_key_${newProvider}`) || config.defaultKey || '';
+    let savedKey = localStorage.getItem(`fraiday_key_${newProvider}`) || config.defaultKey || '';
+    if (config.defaultKey && (!savedKey || savedKey.split(',').length < config.defaultKey.split(',').length)) {
+      savedKey = config.defaultKey;
+    }
     if (keyInput) keyInput.value = savedKey;
 
     // 2. Restore saved model for this provider or default model
-    const savedModel = localStorage.getItem(`fraiday_model_${newProvider}`) || config.defaultModel;
+    let savedModel = localStorage.getItem(`fraiday_model_${newProvider}`) || config.defaultModel;
+    if (newProvider === 'groq' && (!savedModel || savedModel.includes('20b'))) {
+      savedModel = config.defaultModel;
+    }
     if (modelInput) modelInput.value = savedModel;
 
-    // 3. Update model presets dropdown
+    // 3. Update model presets dropdown & helper text
     this.populateModelPresets(newProvider, savedModel);
+    this.updateKeyHelperText(savedKey, newProvider);
   }
 
   async testSettingsConnection() {
@@ -686,12 +1396,14 @@ class AppCoordinator {
       if (resp.ok) {
         const data = await resp.json();
         const modelUsed = data.model_used || model;
+        const keysCount = data.keys_count || 1;
+        const keyInfo = keysCount > 1 ? ` · ⚡ Active <strong>${keysCount}-Key Round-Robin Rotation</strong>` : '';
         if (statusBox) {
           statusBox.style.display = 'block';
           statusBox.style.background = 'rgba(16, 185, 129, 0.15)';
           statusBox.style.border = '1px solid rgba(16, 185, 129, 0.4)';
           statusBox.style.color = '#34d399';
-          statusBox.innerHTML = `✔ <strong>Verification Successful!</strong><br/>Responded in ${elapsed}ms using model <code>${modelUsed}</code>. Ready for autonomous execution.`;
+          statusBox.innerHTML = `✔ <strong>Verification Successful!</strong><br/>Responded in ${elapsed}ms using model <code>${modelUsed}</code>${keyInfo}. Ready for autonomous execution.`;
         }
       } else {
         const errData = await resp.json().catch(() => ({}));
@@ -729,9 +1441,19 @@ class AppCoordinator {
     if (statusBox) statusBox.style.display = 'none';
 
     const activeProvider = this.agentEngine?.provider || localStorage.getItem('fraiday_provider') || 'groq';
-    const activeKey = this.agentEngine?.apiKey || localStorage.getItem('fraiday_api_key') || localStorage.getItem(`fraiday_key_${activeProvider}`) || '';
-    const activeModel = this.agentEngine?.model || localStorage.getItem('fraiday_model') || localStorage.getItem(`fraiday_model_${activeProvider}`) || 'openai/gpt-oss-20b';
-    const activeSafety = localStorage.getItem('fraiday_safety') || 'request_review';
+    const providerConfig = PROVIDER_PRESETS[activeProvider] || PROVIDER_PRESETS.groq;
+
+    let activeKey = this.agentEngine?.apiKey || localStorage.getItem('fraiday_api_key') || localStorage.getItem(`fraiday_key_${activeProvider}`) || providerConfig.defaultKey || '';
+    if (providerConfig.defaultKey && (!activeKey || activeKey.split(',').length < providerConfig.defaultKey.split(',').length)) {
+      activeKey = providerConfig.defaultKey;
+    }
+
+    let activeModel = this.agentEngine?.model || localStorage.getItem('fraiday_model') || localStorage.getItem(`fraiday_model_${activeProvider}`) || providerConfig.defaultModel || 'openai/gpt-oss-120b';
+    if (activeProvider === 'groq' && (!activeModel || activeModel.includes('20b'))) {
+      activeModel = providerConfig.defaultModel || 'openai/gpt-oss-120b';
+    }
+
+    const activeSafety = localStorage.getItem('fraiday_safety') || 'autonomous_execute';
 
     if (providerSelect) providerSelect.value = activeProvider;
     if (keyInput) keyInput.value = activeKey;
@@ -739,6 +1461,7 @@ class AppCoordinator {
     if (safetySelect) safetySelect.value = activeSafety;
 
     this.populateModelPresets(activeProvider, activeModel);
+    this.updateKeyHelperText(activeKey, activeProvider);
 
     if (modal) {
       modal.classList.add('open');
@@ -764,7 +1487,6 @@ class AppCoordinator {
 
     const providerLabels = {
       groq: 'Groq',
-      cerebras: 'Cerebras',
       nvidia: 'NVIDIA NIM',
       openai: 'OpenAI',
       ollama: 'Ollama'
@@ -779,8 +1501,9 @@ class AppCoordinator {
       .replace(/^gpt-oss-20b$/i, 'GPT OSS 20B')
       .replace(/^qwen-3\.8-27b$/i, 'Qwen 3.8 27B')
       .replace(/^llama-3\.2-11b-vision-instruct$/i, 'Llama 3.2 11B')
-      .replace(/^llama-3\.1-8b-instruct$/i, 'Llama 3.1 8B')
-      .replace(/^llama-3\.3-70b-instruct$/i, 'Llama 3.3 70B')
+      .replace(/^llama-3\.2-90b-vision-instruct$/i, 'Llama 3.2 90B')
+      .replace(/^llama-3\.3-70b-versatile$/i, 'Llama 3.3 70B')
+      .replace(/^llama-3\.1-8b-instant$/i, 'Llama 3.1 8B')
       .replace(/^gpt-4o-mini$/i, 'GPT-4o Mini')
       .replace(/^gpt-4o$/i, 'GPT-4o');
 
@@ -794,8 +1517,36 @@ class AppCoordinator {
       const resp = await fetch('/api/config');
       if (resp.ok) {
         const data = await resp.json();
-        const activeProvider = localStorage.getItem('fraiday_provider') || data.provider || 'groq';
-        const activeModel = localStorage.getItem('fraiday_model') || data.model || 'openai/gpt-oss-20b';
+        const activeProvider = data.provider || localStorage.getItem('fraiday_provider') || 'groq';
+        const providerConfig = PROVIDER_PRESETS[activeProvider] || PROVIDER_PRESETS.groq;
+
+        // Upgrade/sync model from server
+        let activeModel = data.model || localStorage.getItem('fraiday_model') || providerConfig.defaultModel;
+        if (activeProvider === 'groq' && (!activeModel || activeModel.includes('20b'))) {
+          activeModel = data.model || 'openai/gpt-oss-120b';
+        }
+        localStorage.setItem('fraiday_provider', activeProvider);
+        localStorage.setItem('fraiday_model', activeModel);
+        localStorage.setItem(`fraiday_model_${activeProvider}`, activeModel);
+
+        // Upgrade/sync API keys from server
+        let activeKey = data.api_key || localStorage.getItem('fraiday_api_key') || providerConfig.defaultKey || '';
+        if (data.api_key) {
+          activeKey = data.api_key;
+        } else if (providerConfig.defaultKey && (!activeKey || activeKey.split(',').length < providerConfig.defaultKey.split(',').length)) {
+          activeKey = providerConfig.defaultKey;
+        }
+        if (activeKey) {
+          localStorage.setItem('fraiday_api_key', activeKey);
+          localStorage.setItem(`fraiday_key_${activeProvider}`, activeKey);
+        }
+
+        if (this.agentEngine) {
+          this.agentEngine.provider = activeProvider;
+          this.agentEngine.model = activeModel;
+          if (activeKey) this.agentEngine.apiKey = activeKey;
+        }
+
         this.updateModelDisplay(activeProvider, activeModel);
       }
     } catch (_) {
@@ -817,6 +1568,14 @@ class AppCoordinator {
     const presetSelect = document.getElementById('setting-model-preset');
     const keyInput = document.getElementById('setting-api-key');
     const modelInput = document.getElementById('setting-model');
+
+    // Live update rotation badge on typing/pasting keys
+    if (keyInput) {
+      keyInput.addEventListener('input', (e) => {
+        const prov = providerSelect ? providerSelect.value : 'groq';
+        this.updateKeyHelperText(e.target.value, prov);
+      });
+    }
 
     // Provider dropdown changed
     if (providerSelect) {
@@ -999,6 +1758,24 @@ class AppCoordinator {
         body: JSON.stringify({ provider, api_key: apiKey, model, safety })
       });
 
+      // 7b. Sync Vectorize Hindsight Memory config
+      const hsKeyInput = document.getElementById('setting-hindsight-key');
+      const hsUrlInput = document.getElementById('setting-hindsight-url');
+      const hsBankInput = document.getElementById('setting-hindsight-bank');
+      if (hsUrlInput || hsBankInput || hsKeyInput) {
+        const hsKey = hsKeyInput ? hsKeyInput.value.trim() : '';
+        const hsUrl = hsUrlInput ? hsUrlInput.value.trim() : 'https://api.hindsight.vectorize.io';
+        const hsBank = hsBankInput ? hsBankInput.value.trim() : 'fraiday-core-memory';
+        fetch('/api/hindsight/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ api_key: hsKey, base_url: hsUrl, bank_id: hsBank })
+        }).then(r => r.json()).then(st => {
+          this.hindsightInspector?.refreshData();
+          this.updateHindsightHudPill(this.agentEngine.hindsightEnabled !== false);
+        }).catch(() => {});
+      }
+
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));
         throw new Error(err.error || `Server responded with ${resp.status}`);
@@ -1126,25 +1903,132 @@ class AppCoordinator {
     const input = document.getElementById('contextual-prompt-input');
     const sendBtn = document.getElementById('btn-send-context-prompt');
     const stopContextBtn = document.getElementById('btn-stop-context-prompt');
+    const slashPopup = document.getElementById('slash-commands-popup');
+
+    const hideSlashPopup = () => {
+      if (slashPopup) slashPopup.style.display = 'none';
+    };
+
+    const showSlashPopup = () => {
+      if (slashPopup) slashPopup.style.display = 'block';
+    };
+
+    const executeSlashCommand = async (cmdStr) => {
+      const parts = cmdStr.trim().split(/\s+/);
+      const command = parts[0].toLowerCase();
+      const arg = parts.slice(1).join(' ');
+
+      if (command === '/fix') {
+        const errors = (this.consoleLogs || []).filter(l => l.level === 'error').map(l => (l.args || []).join(' ')).slice(-5);
+        const goal = arg || (errors.length > 0
+          ? `Diagnose and fix the following runtime errors in the application: ${errors.join('; ')}`
+          : 'Audit all workspace files and fix any syntax or runtime bugs');
+        this.agentEngine.executeGoal(goal);
+      } else if (command === '/test') {
+        this.switchTab('terminal');
+        this.terminal.appendOutput('🧪 Running autonomous test & visual verification suite...', 'warn');
+        try {
+          const verifyRes = await fetch('/api/build/verify', { method: 'POST' }).then(r => r.json());
+          if (verifyRes.success) {
+            this.terminal.appendOutput(`✔ Automated verification passed: ${verifyRes.message || 'Build is healthy'}`, 'success');
+          } else {
+            this.terminal.appendOutput(`❌ Verification failed: ${verifyRes.error || 'Issues detected'}`, 'error');
+          }
+        } catch (e) {
+          this.terminal.appendOutput(`❌ Verification error: ${e.message}`, 'error');
+        }
+      } else if (command === '/plan') {
+        const goal = arg || 'Research modern UI best practices and architect a full-featured web application';
+        this.agentEngine.executeGoal(goal);
+      } else if (command === '/audit') {
+        const viewScreenshotBtn = document.getElementById('btn-view-screenshot');
+        if (viewScreenshotBtn) viewScreenshotBtn.click();
+      } else if (command === '/export') {
+        const exportZipBtn = document.getElementById('btn-export-zip');
+        if (exportZipBtn) exportZipBtn.click();
+      } else if (command === '/checkpoint') {
+        const name = arg || 'quick-save';
+        const res = await fetch('/api/workspace/checkpoint', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name })
+        }).then(r => r.json()).catch(() => ({}));
+        if (res.success) {
+          this.terminal.appendOutput(`✔ Saved checkpoint "${name}".`, 'success');
+        }
+      } else if (command === '/rollback') {
+        const checkpointsBtn = document.getElementById('btn-checkpoints');
+        if (checkpointsBtn) checkpointsBtn.click();
+      } else if (command === '/clear') {
+        const clearBtn = document.getElementById('btn-clear-workspace');
+        if (clearBtn) clearBtn.click();
+      } else {
+        const termCmd = cmdStr.startsWith('/') ? cmdStr.slice(1) : cmdStr;
+        this.switchTab('terminal');
+        this.terminal.runCommand(termCmd);
+      }
+    };
 
     const handleSend = () => {
       const val = input.value.trim();
       if (!val) return;
       input.value = '';
+      hideSlashPopup();
 
       if (val.startsWith('/')) {
-        const cmd = val.slice(1);
-        this.terminal.runCommand(cmd);
+        executeSlashCommand(val);
       } else {
         this.agentEngine.executeGoal(val);
       }
     };
 
+    if (input) {
+      input.addEventListener('input', () => {
+        const v = input.value;
+        if (v.startsWith('/')) {
+          showSlashPopup();
+          const filter = v.toLowerCase();
+          if (slashPopup) {
+            slashPopup.querySelectorAll('.slash-item').forEach(item => {
+              const cmd = item.getAttribute('data-cmd');
+              item.style.display = cmd.startsWith(filter) ? 'flex' : 'none';
+            });
+          }
+        } else {
+          hideSlashPopup();
+        }
+      });
+
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          handleSend();
+        } else if (e.key === 'Escape') {
+          hideSlashPopup();
+        }
+      });
+    }
+
+    if (slashPopup) {
+      slashPopup.querySelectorAll('.slash-item').forEach(item => {
+        item.addEventListener('click', () => {
+          const cmd = item.getAttribute('data-cmd');
+          if (input) {
+            input.value = cmd + ' ';
+            input.focus();
+          }
+          hideSlashPopup();
+        });
+      });
+    }
+
+    document.addEventListener('click', (e) => {
+      if (slashPopup && !slashPopup.contains(e.target) && e.target !== input) {
+        hideSlashPopup();
+      }
+    });
+
     if (sendBtn && input) {
       sendBtn.addEventListener('click', handleSend);
-      input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') handleSend();
-      });
     }
 
     if (stopContextBtn) {
@@ -1179,7 +2063,7 @@ class AppCoordinator {
     if (stopContextBtn) stopContextBtn.style.display = isRunning ? 'inline-flex' : 'none';
   }
 
-  renderUserMessageInChat(text) {
+  renderUserMessageInChat(text, customTime = null) {
     const chatTimeline = document.getElementById('chat-timeline');
     if (!chatTimeline || !text) return;
 
@@ -1190,8 +2074,7 @@ class AppCoordinator {
     row.style.gap = '6px';
     row.style.marginBottom = '12px';
 
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const timeStr = customTime || (new Date()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
     row.innerHTML = `
       <div class="chat-sender-row">
@@ -1211,7 +2094,7 @@ class AppCoordinator {
     }
   }
 
-  renderAgentMessageInChat(markdown) {
+  renderAgentMessageInChat(markdown, customTime = null) {
     const chatTimeline = document.getElementById('chat-timeline');
     if (!chatTimeline || !markdown) return;
 
@@ -1222,8 +2105,7 @@ class AppCoordinator {
     row.style.gap = '6px';
     row.style.marginBottom = '12px';
 
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const timeStr = customTime || (new Date()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
     row.innerHTML = `
       <div class="chat-sender-row">
@@ -1243,7 +2125,7 @@ class AppCoordinator {
     }
   }
 
-  renderPlanApprovalCardInChat(planMarkdown) {
+  renderPlanApprovalCardInChat(planMarkdown, customTime = null) {
     const chatTimeline = document.getElementById('chat-timeline');
     if (!chatTimeline) return;
 
@@ -1258,8 +2140,7 @@ class AppCoordinator {
     row.style.gap = '6px';
     row.style.marginBottom = '12px';
 
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const timeStr = customTime || (new Date()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
     const firstLine = (planMarkdown || '').split('\n').find(l => l.startsWith('#')) || '# Implementation Plan';
     const titleText = firstLine.replace(/^#+\s*/, '');
@@ -1314,7 +2195,38 @@ class AppCoordinator {
     }
   }
 
-  renderSystemAlertInChat(alertData) {
+  renderApprovedPlanCardInChat(planMarkdown, customTime = null) {
+    const chatTimeline = document.getElementById('chat-timeline');
+    if (!chatTimeline) return;
+
+    const row = document.createElement('div');
+    row.className = 'chat-msg-row chat-plan-row';
+    row.style.display = 'flex';
+    row.style.flexDirection = 'column';
+    row.style.gap = '6px';
+    row.style.marginBottom = '12px';
+
+    const timeStr = customTime || (new Date()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const firstLine = (planMarkdown || '').split('\n').find(l => l.startsWith('#')) || '# Implementation Plan';
+    const titleText = firstLine.replace(/^#+\s*/, '');
+
+    row.innerHTML = `
+      <div class="chat-sender-row">
+        <span class="chat-sender-avatar">📋</span>
+        <span class="chat-sender-name">Planning Gate</span>
+        <span class="chat-sender-badge" style="background:rgba(16,185,129,0.2);color:#34d399;border:1px solid rgba(16,185,129,0.4);">Approved</span>
+        <span class="chat-time">${timeStr}</span>
+      </div>
+      <div class="chat-bubble-agent" style="border-color:rgba(16,185,129,0.3);background:rgba(22,27,34,0.95);">
+        <div style="font-weight:700;color:#34d399;margin-bottom:2px;">✔ Plan Approved: ${this.escapeInlineMd(titleText)}</div>
+        <div style="font-size:11.5px;color:#94a3b8;">Full architectural plan archived in the <strong>Plan & Artifacts</strong> tab.</div>
+      </div>
+    `;
+
+    chatTimeline.appendChild(row);
+  }
+
+  renderSystemAlertInChat(alertData, customTime = null, skipRecord = false) {
     const chatTimeline = document.getElementById('chat-timeline');
     if (!chatTimeline || !alertData) return;
 
@@ -1325,8 +2237,7 @@ class AppCoordinator {
     row.style.gap = '6px';
     row.style.marginBottom = '12px';
 
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const timeStr = customTime || (new Date()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const cleanFile = (alertData.filename || 'script').split('/').pop() || 'workspace script';
 
     row.innerHTML = `
@@ -1354,13 +2265,17 @@ class AppCoordinator {
 
     chatTimeline.appendChild(row);
 
+    if (!skipRecord && this.agentEngine) {
+      this.agentEngine.recordTimelineEvent({ type: 'system_alert', alertData, timestamp: timeStr });
+    }
+
     const cockpitScroll = document.getElementById('cockpit-scroll-area');
     if (cockpitScroll) {
       cockpitScroll.scrollTop = cockpitScroll.scrollHeight;
     }
   }
 
-  renderVerificationScreenshotInChat(result) {
+  renderVerificationScreenshotInChat(result, customTime = null, skipRecord = false) {
     const chatTimeline = document.getElementById('chat-timeline');
     if (!chatTimeline || !result || !result.screenshot_url) return;
 
@@ -1376,8 +2291,7 @@ class AppCoordinator {
     row.style.gap = '6px';
     row.style.marginBottom = '12px';
 
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const timeStr = customTime || (new Date()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
     row.innerHTML = `
       <div class="chat-sender-row">
@@ -1405,13 +2319,17 @@ class AppCoordinator {
 
     chatTimeline.appendChild(row);
 
+    if (!skipRecord && this.agentEngine) {
+      this.agentEngine.recordTimelineEvent({ type: 'verification_screenshot', result, timestamp: timeStr });
+    }
+
     const cockpitScroll = document.getElementById('cockpit-scroll-area');
     if (cockpitScroll) {
       cockpitScroll.scrollTop = cockpitScroll.scrollHeight;
     }
   }
 
-  renderHaltedCardInChat(haltData) {
+  renderHaltedCardInChat(haltData, customTime = null, skipRecord = false) {
     const chatTimeline = document.getElementById('chat-timeline');
     if (!chatTimeline || !haltData) return;
 
@@ -1422,8 +2340,7 @@ class AppCoordinator {
     row.style.gap = '6px';
     row.style.marginBottom = '12px';
 
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const timeStr = customTime || (new Date()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
     const isAborted = Boolean(haltData.aborted);
     const rawError = (haltData.error || haltData.reason || '').toLowerCase();
@@ -1443,89 +2360,87 @@ class AppCoordinator {
       icon = '⏹';
       title = 'Execution Stopped by User';
       badge = 'Stopped';
-      borderColor = 'rgba(245, 158, 11, 0.4)';
-      bgColor = 'rgba(28, 20, 12, 0.95)';
-      titleColor = '#fbbf24';
+      borderColor = 'rgba(148, 163, 184, 0.4)';
+      bgColor = 'rgba(15, 23, 42, 0.95)';
+      titleColor = '#94a3b8';
       actionButtons = `
-        <button id="btn-halt-resume" class="btn btn-primary btn-sm" style="background:#10b981;border-color:#10b981;font-size:11.5px;padding:5px 12px;font-weight:700;">
+        <button class="btn btn-primary btn-sm btn-chat-resume" style="background:#3b82f6;border-color:#3b82f6;font-weight:700;">
           ▶ Resume Objective
         </button>
       `;
     } else if (isRateLimit) {
       icon = '⏳';
-      title = 'Execution Halted: API Rate Limit / Quota Exceeded';
-      badge = 'HTTP 429 Rate Limit';
-      borderColor = 'rgba(239, 68, 68, 0.5)';
-      bgColor = 'rgba(32, 12, 16, 0.95)';
+      title = 'API Rate Limit Reached';
+      badge = 'Rate Limited';
+      borderColor = 'rgba(245, 158, 11, 0.4)';
+      bgColor = 'rgba(28, 20, 10, 0.95)';
+      titleColor = '#fbbf24';
       actionButtons = `
-        <button id="btn-halt-open-settings" class="btn btn-primary btn-sm" style="background:#38bdf8;border-color:#38bdf8;color:#0f172a;font-weight:700;font-size:11.5px;padding:5px 12px;">
-          ⚙️ Switch Provider / Model in Settings
+        <button class="btn btn-primary btn-sm btn-chat-open-settings" style="background:#f59e0b;border-color:#f59e0b;font-weight:700;">
+          ⚙️ Switch AI Model / Provider
         </button>
-        <button id="btn-halt-retry" class="btn btn-secondary btn-sm" style="font-size:11.5px;padding:5px 12px;">
-          ↻ Retry Step
+        <button class="btn btn-secondary btn-sm btn-chat-resume">
+          ↺ Retry Request
         </button>
       `;
     } else if (isAuth) {
       icon = '🔑';
-      title = 'Execution Halted: Invalid or Missing API Key';
+      title = 'Invalid or Missing API Key';
       badge = 'Authentication Error';
       actionButtons = `
-        <button id="btn-halt-open-settings" class="btn btn-primary btn-sm" style="background:#38bdf8;border-color:#38bdf8;color:#0f172a;font-weight:700;font-size:11.5px;padding:5px 12px;">
-          ⚙️ Configure API Key in Settings
+        <button class="btn btn-primary btn-sm btn-chat-open-settings" style="background:#3b82f6;border-color:#3b82f6;font-weight:700;">
+          ⚙️ Configure API Key
         </button>
       `;
     } else if (isTurnLimit) {
       icon = '⚠️';
-      title = 'Execution Halted: Autonomy Turn Limit Reached';
-      badge = '100 Steps Guardrail';
+      title = 'Turn Limit Reached (100 Turns)';
+      badge = 'Turn Limit';
       borderColor = 'rgba(245, 158, 11, 0.4)';
-      bgColor = 'rgba(28, 20, 12, 0.95)';
+      bgColor = 'rgba(28, 20, 10, 0.95)';
       titleColor = '#fbbf24';
       actionButtons = `
-        <button id="btn-halt-resume" class="btn btn-primary btn-sm" style="background:#10b981;border-color:#10b981;font-size:11.5px;padding:5px 12px;font-weight:700;">
+        <button class="btn btn-primary btn-sm btn-chat-resume" style="background:#10b981;border-color:#10b981;font-weight:700;">
           ▶ Continue Execution
         </button>
       `;
     } else {
-      title = haltData.title || 'Execution Halted';
-      badge = haltData.badge || 'Error';
       actionButtons = `
-        <button id="btn-halt-retry" class="btn btn-secondary btn-sm" style="font-size:11.5px;padding:5px 12px;">
-          ↻ Retry Step
+        <button class="btn btn-primary btn-sm btn-chat-resume" style="background:#3b82f6;border-color:#3b82f6;font-weight:700;">
+          ↺ Retry
         </button>
-        <button id="btn-halt-open-settings" class="btn btn-secondary btn-sm" style="font-size:11.5px;padding:5px 12px;">
-          ⚙️ Settings
+        <button class="btn btn-secondary btn-sm btn-chat-open-settings">
+          ⚙️ AI Settings
         </button>
       `;
     }
 
-    const reasonText = haltData.reason || haltData.error || 'Execution was interrupted.';
-    const adviceText = haltData.advice || (
+    const advice = haltData.advice || (
       isRateLimit
-        ? 'Your active AI provider reached its token or request limit. You can switch to Cerebras, NVIDIA NIM, OpenAI, or a lighter model preset in Settings ⚙️ to continue immediately.'
+        ? 'Your active AI provider reached its token or request limit. You can switch to NVIDIA NIM, Groq, OpenAI, or a lighter model preset in Settings ⚙️ to continue immediately.'
         : isAuth
-        ? 'Please check or re-enter your API key in the Settings modal.'
-        : isAborted
-        ? 'Autonomous execution was interrupted. All files and workspace progress are safely preserved.'
-        : 'The autonomous loop stopped. Review the diagnostics above or adjust settings.'
+        ? 'Please check your API key in Settings ⚙️ and click Save Configuration.'
+        : isTurnLimit
+        ? 'Autonomous execution reached 100 turns. Click Continue Execution to proceed.'
+        : 'Execution halted due to a gateway or tool error. You can retry or switch model preset in Settings ⚙️.'
     );
 
     row.innerHTML = `
       <div class="chat-sender-row">
         <span class="chat-sender-avatar">${icon}</span>
-        <span class="chat-sender-name">System Status</span>
-        <span class="chat-sender-badge" style="background:${titleColor}22;color:${titleColor};border:1px solid ${titleColor}55;">${badge}</span>
+        <span class="chat-sender-name">Execution Guardian</span>
+        <span class="chat-sender-badge" style="background:rgba(239,68,68,0.2);color:${titleColor};border:1px solid ${borderColor};">${badge}</span>
         <span class="chat-time">${timeStr}</span>
       </div>
-      <div class="chat-bubble-agent" style="border-color:${borderColor};background:${bgColor};color:#f1f5f9;">
-        <div style="font-weight:700;color:${titleColor};margin-bottom:6px;font-size:13px;display:flex;align-items:center;gap:6px;">
-          <span>${title}</span>
+      <div class="chat-bubble-agent" style="border-color:${borderColor};background:${bgColor};">
+        <div style="font-weight:700;color:${titleColor};margin-bottom:4px;display:flex;align-items:center;gap:6px;">
+          <span>${icon}</span> <span>${this.escapeInlineMd(title)}</span>
         </div>
-        <div style="font-family:var(--font-mono);font-size:11.5px;background:rgba(0,0,0,0.45);padding:8px 12px;border-radius:4px;border:1px solid ${borderColor};color:#fecaca;word-break:break-all;margin-bottom:8px;">
-          ${this.escapeInlineMd(reasonText)}
+        <div style="font-size:12px;color:#fca5a5;margin-bottom:8px;font-family:var(--font-mono);background:rgba(0,0,0,0.3);padding:6px 8px;border-radius:4px;word-break:break-all;">
+          ${this.escapeInlineMd(haltData.error || haltData.reason || 'Unknown interruption.')}
         </div>
-        <div style="font-size:12px;color:#cbd5e1;line-height:1.5;margin-bottom:10px;">
-          ${this.escapeInlineMd(adviceText)}
+        <div style="font-size:11.5px;color:#cbd5e1;line-height:1.45;margin-bottom:12px;">
+          ${this.escapeInlineMd(advice)}
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           ${actionButtons}
@@ -1535,23 +2450,15 @@ class AppCoordinator {
 
     chatTimeline.appendChild(row);
 
-    const resumeBtn = row.querySelector('#btn-halt-resume');
-    const retryBtn = row.querySelector('#btn-halt-retry');
-    const settingsBtn = row.querySelector('#btn-halt-open-settings');
+    if (!skipRecord && this.agentEngine) {
+      this.agentEngine.recordTimelineEvent({ type: 'halted_card', haltData, timestamp: timeStr });
+    }
+
+    const resumeBtn = row.querySelector('.btn-chat-resume');
+    const settingsBtn = row.querySelector('.btn-chat-open-settings');
 
     if (resumeBtn) {
       resumeBtn.addEventListener('click', () => {
-        row.remove();
-        if (this.agentEngine && typeof this.agentEngine.resumeGoal === 'function') {
-          this.agentEngine.resumeGoal();
-        } else if (this.agentEngine && this.agentEngine.currentGoal) {
-          this.agentEngine.executeGoal(this.agentEngine.currentGoal);
-        }
-      });
-    }
-
-    if (retryBtn) {
-      retryBtn.addEventListener('click', () => {
         row.remove();
         if (this.agentEngine && typeof this.agentEngine.resumeGoal === 'function') {
           this.agentEngine.resumeGoal();
@@ -1570,6 +2477,132 @@ class AppCoordinator {
     const cockpitScroll = document.getElementById('cockpit-scroll-area');
     if (cockpitScroll) {
       cockpitScroll.scrollTop = cockpitScroll.scrollHeight;
+    }
+  }
+
+  async rehydrateSession(forceBackend = false) {
+    let sessionData = null;
+    const storageKey = `fraiday_session_${this.activeWorkspace || 'default'}`;
+
+    // 1. Try instant browser localStorage cache
+    if (!forceBackend && typeof localStorage !== 'undefined') {
+      try {
+        const raw = localStorage.getItem(storageKey);
+        if (raw) sessionData = JSON.parse(raw);
+      } catch (_) {}
+    }
+
+    // 2. If not in localStorage or empty or forceBackend, fetch from backend disk storage
+    if (!sessionData || !sessionData.timelineEvents || sessionData.timelineEvents.length === 0 || forceBackend) {
+      try {
+        const res = await fetch('/api/session').then(r => r.json());
+        if (res && res.success && res.session) {
+          sessionData = res.session;
+          if (typeof localStorage !== 'undefined') {
+            try {
+              localStorage.setItem(storageKey, JSON.stringify(sessionData));
+            } catch (_) {}
+          }
+        }
+      } catch (err) {
+        console.warn('Backend session fetch note:', err);
+      }
+    }
+
+    if (!sessionData || !sessionData.timelineEvents || sessionData.timelineEvents.length === 0) {
+      const chatTimeline = document.getElementById('chat-timeline');
+      if (chatTimeline) {
+        chatTimeline.querySelectorAll('.tool-card, .chat-msg-row, .chat-plan-row, .chat-verification-row, .chat-system-alert-row, .chat-halted-row').forEach(el => el.remove());
+      }
+      return;
+    }
+
+    // A. Restore Agent Engine internal memory
+    if (this.agentEngine) {
+      this.agentEngine.conversationHistory = Array.isArray(sessionData.conversationHistory) ? sessionData.conversationHistory : [];
+      this.agentEngine.currentGoal = sessionData.currentGoal || '';
+      this.agentEngine.turnCount = sessionData.turnCount || 0;
+      this.agentEngine.planApproved = Boolean(sessionData.planApproved);
+      this.agentEngine.timelineEvents = Array.isArray(sessionData.timelineEvents) ? sessionData.timelineEvents : [];
+      if (sessionData.state) {
+        this.agentEngine.setState(sessionData.state);
+      }
+      if (sessionData.hindsightEnabled !== undefined) {
+        if (this.agentEngine.setHindsightMode) {
+          this.agentEngine.setHindsightMode(sessionData.hindsightEnabled);
+        } else {
+          this.agentEngine.hindsightEnabled = sessionData.hindsightEnabled;
+        }
+        if (this.hindsightInspector) {
+          this.hindsightInspector.isHindsightEnabled = sessionData.hindsightEnabled;
+          this.hindsightInspector.render();
+        }
+        this.updateHindsightHudPill(sessionData.hindsightEnabled);
+      }
+    }
+
+    // B. Restore Monologue reasoning box
+    const monologueCard = document.getElementById('agent-monologue-card');
+    if (monologueCard && sessionData.monologueHtml) {
+      const body = monologueCard.querySelector('.monologue-text') || monologueCard;
+      if (body) body.innerHTML = sessionData.monologueHtml;
+    }
+
+    // C. Restore Knowledge Base items
+    if (this.knowledgeBase && Array.isArray(sessionData.knowledgeItems) && sessionData.knowledgeItems.length > 0) {
+      this.knowledgeBase.setItems(sessionData.knowledgeItems);
+    }
+
+    // D. Restore DAG Canvas
+    if (this.dagCanvas) {
+      if (Array.isArray(sessionData.dagNodes)) {
+        this.dagCanvas.setNodes(sessionData.dagNodes, sessionData.dagStage || null);
+      } else if (sessionData.dagStage) {
+        this.dagCanvas.setActiveStage(sessionData.dagStage);
+      }
+    }
+
+    // E. Rebuild Timeline Cards in identical chronological order
+    const chatTimeline = document.getElementById('chat-timeline');
+    if (chatTimeline && Array.isArray(sessionData.timelineEvents) && sessionData.timelineEvents.length > 0) {
+      chatTimeline.querySelectorAll('.tool-card, .chat-msg-row, .chat-plan-row, .chat-verification-row, .chat-system-alert-row, .chat-halted-row').forEach(el => el.remove());
+      let toolCallCount = 0;
+
+      for (const ev of sessionData.timelineEvents) {
+        if (ev.type === 'user_message') {
+          this.renderUserMessageInChat(ev.text, ev.timestamp);
+        } else if (ev.type === 'tool_card') {
+          toolCallCount++;
+          const card = this.agentEngine?.addAntigravityToolCard(ev.toolName, ev.toolArgs, ev.id, true);
+          if (card && ev.status && ev.status !== 'running') {
+            this.agentEngine?.updateToolCard(card, ev.status, ev.extraText, ev.toolResult, true);
+          }
+        } else if (ev.type === 'agent_message') {
+          this.renderAgentMessageInChat(ev.markdown, ev.timestamp);
+        } else if (ev.type === 'plan_approval') {
+          if (!ev.approved && this.agentEngine?.state === 'waiting') {
+            this.renderPlanApprovalCardInChat(ev.planMarkdown, ev.timestamp);
+          } else {
+            this.renderApprovedPlanCardInChat(ev.planMarkdown, ev.timestamp);
+          }
+        } else if (ev.type === 'system_alert') {
+          this.renderSystemAlertInChat(ev.alertData, ev.timestamp, true);
+        } else if (ev.type === 'verification_screenshot') {
+          this.renderVerificationScreenshotInChat(ev.result, ev.timestamp, true);
+        } else if (ev.type === 'halted_card') {
+          this.renderHaltedCardInChat(ev.haltData, ev.timestamp, true);
+        }
+      }
+
+      const streamCount = document.getElementById('tool-stream-count');
+      if (streamCount) streamCount.innerText = `${toolCallCount} calls`;
+
+      const cockpitScroll = document.getElementById('cockpit-scroll-area');
+      if (cockpitScroll) cockpitScroll.scrollTop = cockpitScroll.scrollHeight;
+
+      if (this.terminal) {
+        this.terminal.appendOutput(`✔ Restored persistent session (${sessionData.timelineEvents.length} events, ${sessionData.conversationHistory?.length || 0} turns in memory)`, 'success');
+      }
     }
   }
 

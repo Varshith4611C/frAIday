@@ -21,7 +21,7 @@ export class TerminalComponent {
             <span class="t-dot yellow"></span>
             <span class="t-dot green"></span>
           </div>
-          <span>bash — frAIday-workspace [cwd: ./workspace]</span>
+          <span id="term-header-title">bash — frAIday-workspace [cwd: ./workspace]</span>
           <div style="display:flex;gap:6px;">
             <button id="btn-clear-term" style="background:transparent;border:none;color:#64748b;cursor:pointer;font-size:11px;">Clear</button>
           </div>
@@ -120,5 +120,22 @@ export class TerminalComponent {
   clear() {
     const body = this.container.querySelector('#term-body');
     if (body) body.innerHTML = '';
+  }
+
+  setWorkspace(name, path) {
+    this.workspaceName = name;
+    this.workspacePath = path;
+    const titleEl = this.container?.querySelector('#term-header-title');
+    if (titleEl) {
+      titleEl.textContent = `bash — frAIday-workspace [workspace: ${name} | cwd: ${path || ('./workspaces/' + name)}]`;
+    }
+    const body = this.container?.querySelector('#term-body');
+    if (body) {
+      const line = document.createElement('div');
+      line.className = 'terminal-line';
+      line.innerHTML = `<span class="terminal-prompt" style="color:#a855f7;">fraiday@workspace:~$</span> <span style="color:#38bdf8;">Switched terminal execution context to workspace: <strong>${name}</strong></span>`;
+      body.appendChild(line);
+      body.scrollTop = body.scrollHeight;
+    }
   }
 }

@@ -339,9 +339,9 @@ export class AgentEngine {
     this.apiBase = options.apiBase || (typeof window !== 'undefined' ? '' : 'http://localhost:8080');
 
     const storage = typeof localStorage !== 'undefined' ? localStorage : { getItem: () => null, setItem: () => {} };
-    this.provider = storage.getItem('fraiday_provider') || 'groq';
+    this.provider = storage.getItem('fraiday_provider') || 'gemini';
     this.apiKey = storage.getItem('fraiday_api_key') || '';
-    this.model = storage.getItem('fraiday_model') || 'openai/gpt-oss-120b';
+    this.model = storage.getItem('fraiday_model') || 'gemini-3.8-flash';
 
     this.turnCount = 0;
   }

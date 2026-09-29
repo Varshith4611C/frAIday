@@ -13,6 +13,18 @@ import { AgentEngine } from './agent/agent-engine.js';
 import { HindsightInspector } from './components/hindsight-inspector.js';
 
 export const PROVIDER_PRESETS = {
+  gemini: {
+    name: 'Google Gemini (Real Antigravity)',
+    keyHint: 'Google AI Studio Key (AQ... or AIza...)',
+    defaultKey: '',
+    defaultModel: 'gemini-3.8-flash',
+    models: [
+      { id: 'gemini-3.8-flash', label: 'gemini-3.8-flash (High Reasoning · Real Antigravity)' },
+      { id: 'gemini-3.5-flash', label: 'gemini-3.5-flash (Fast & Stable)' },
+      { id: 'gemini-3-flash-preview', label: 'gemini-3-flash-preview (Preview LPU)' },
+      { id: 'custom', label: '⚙️ Custom Model Identifier...' }
+    ]
+  },
   groq: {
     name: 'Groq LPU',
     keyHint: 'Groq Key (gsk_...)',
@@ -1311,7 +1323,10 @@ class AppCoordinator {
     if (!keyHelper) return;
     const keys = (keyStr || '').split(/[,;\s]+/).map(k => k.trim()).filter(Boolean);
     const count = keys.length;
-    if (provider === 'nvidia') {
+    if (provider === 'gemini') {
+      keyHelper.innerHTML = `🌟 <strong>Google Gemini Active</strong>: Native pairing with <code>gemini-3.8-flash</code> (High Reasoning + Multimodal Vision).`;
+      keyHelper.style.color = '#38bdf8';
+    } else if (provider === 'nvidia') {
       keyHelper.innerHTML = `⚡ <strong>NVIDIA NIM Cloud Active</strong>: High-throughput inference powered by <code>meta/llama-3.2-11b-vision-instruct</code>.`;
       keyHelper.style.color = '#38bdf8';
     } else if (provider === 'groq') {

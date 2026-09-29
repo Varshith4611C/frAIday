@@ -253,15 +253,34 @@ except Exception as _hse:
     HINDSIGHT = None
 
 # Preconfigured keys loaded from environment or .env
+DEFAULT_GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
 DEFAULT_GROQ_KEY = os.environ.get("GROQ_API_KEY", "")
 DEFAULT_NVIDIA_KEY = os.environ.get("NVIDIA_API_KEY", "")
-DEFAULT_PROVIDER = os.environ.get("AI_PROVIDER", "groq")
+DEFAULT_PROVIDER = os.environ.get("AI_PROVIDER", "gemini" if DEFAULT_GEMINI_KEY else "groq")
+
+def get_initial_key(prov):
+    if prov == "gemini":
+        return DEFAULT_GEMINI_KEY
+    elif prov == "groq":
+        return DEFAULT_GROQ_KEY
+    elif prov == "nvidia":
+        return DEFAULT_NVIDIA_KEY
+    return ""
+
+def get_initial_model(prov):
+    if prov == "gemini":
+        return os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
+    elif prov == "groq":
+        return os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
+    elif prov == "nvidia":
+        return os.environ.get("NVIDIA_MODEL", "meta/llama-3.2-11b-vision-instruct")
+    return "gemini-3.8-flash"
 
 # Active runtime system configuration (updated via POST /api/config)
 ACTIVE_CONFIG = {
     "provider": DEFAULT_PROVIDER,
-    "api_key": DEFAULT_GROQ_KEY if DEFAULT_PROVIDER == "groq" else DEFAULT_NVIDIA_KEY,
-    "model": os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b") if DEFAULT_PROVIDER == "groq" else "meta/llama-3.2-11b-vision-instruct",
+    "api_key": get_initial_key(DEFAULT_PROVIDER),
+    "model": get_initial_model(DEFAULT_PROVIDER),
     "safety": "autonomous_execute"
 }
 
@@ -1586,6 +1605,8 @@ class FrAIdayHandler(http.server.SimpleHTTPRequestHandler):
             api_key = str(body["api_key"]).strip()
         elif provider == ACTIVE_CONFIG.get("provider") and ACTIVE_CONFIG.get("api_key"):
             api_key = str(ACTIVE_CONFIG["api_key"]).strip()
+        elif provider == "gemini":
+            api_key = os.environ.get("GEMINI_API_KEY", "") or DEFAULT_GEMINI_KEY
         elif provider == "groq":
             api_key = os.environ.get("GROQ_API_KEY", "")
         elif provider == "nvidia":
@@ -1598,7 +1619,69 @@ class FrAIdayHandler(http.server.SimpleHTTPRequestHandler):
         if not messages and prompt:
             messages = [{"role": "user", "content": prompt}]
 
-        if provider == "groq":
+        if provider == "gemini":
+            gemini_key = api_key or DEFAULT_GEMINI_KEY
+            if not gemini_key:
+                self.send_json(400, {
+                    "error": "No API key configured for Google Gemini. Please enter your Google AI Studio API key.",
+                    "missing_api_key": True,
+                    "provider": "gemini"
+                })
+                return
+
+            gemini_model = model or "gemini-3.8-flash"
+            if "/" in gemini_model:
+                gemini_model = gemini_model.split("/")[-1]
+
+            url = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {gemini_key}",
+                "Content-Type": "application/json",
+                "User-Agent": "frAIday-Antigravity/1.0"
+            }
+
+            candidate_models = [gemini_model]
+            for fb in ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3-flash-preview"]:
+                if fb not in candidate_models:
+                    candidate_models.append(fb)
+
+            last_err = ""
+            for curr_model in candidate_models:
+                payload = {
+                    "model": curr_model,
+                    "messages": messages,
+                    "temperature": body.get("temperature", 0.3)
+                }
+                if "tools" in body and body["tools"]:
+                    payload["tools"] = body["tools"]
+
+                for attempt in range(3):
+                    try:
+                        req_data = json.dumps(payload).encode("utf-8")
+                        req = urllib.request.Request(url, data=req_data, headers=headers)
+                        with urllib.request.urlopen(req, timeout=40) as resp:
+                            res_json = json.loads(resp.read().decode("utf-8"))
+                            self.send_json(200, res_json)
+                            return
+                    except urllib.error.HTTPError as e:
+                        err_body = e.read().decode("utf-8", errors="replace")
+                        last_err = f"HTTP {e.code}: {err_body}"
+                        if e.code == 503:
+                            time.sleep(1.5 * (attempt + 1))
+                            continue
+                        elif e.code == 429:
+                            time.sleep(2 * (attempt + 1))
+                            continue
+                        else:
+                            break
+                    except Exception as e:
+                        last_err = str(e)
+                        time.sleep(1)
+
+            self.send_json(500, {"error": f"Gemini API request failed across candidates: {last_err}", "provider": "gemini"})
+            return
+
+        elif provider == "groq":
             global GROQ_KEY_INDEX
             url = "https://api.groq.com/openai/v1/chat/completions"
             client_keys = [k.strip() for k in re.split(r'[,;\n\r\s]+', str(api_key or "")) if k.strip()]
@@ -2338,37 +2421,6 @@ class FrAIdayHandler(http.server.SimpleHTTPRequestHandler):
                 "model_used": "none"
             }
 
-        # Resolve Vision API key: Check NVIDIA_API_KEY from env, .env, or ACTIVE_CONFIG
-        nv_key = os.environ.get("NVIDIA_API_KEY", "")
-        if not nv_key:
-            nv_key = DEFAULT_NVIDIA_KEY
-        if not nv_key and ACTIVE_CONFIG.get("provider") == "nvidia":
-            nv_key = ACTIVE_CONFIG.get("api_key", "")
-
-        # Fallback if no vision key configured
-        if not nv_key:
-            file_size_kb = screenshot_path.stat().st_size / 1024.0
-            if file_size_kb < 3.0:
-                return {
-                    "verdict": "BLANK_SCREEN",
-                    "visual_score": 2,
-                    "visual_summary": f"Screenshot file size ({file_size_kb:.1f} KB) indicates an empty or nearly blank canvas render.",
-                    "defects": ["Rendered canvas contains minimal pixel data (possible white/black screen)"],
-                    "strengths": [],
-                    "model_used": "heuristic_fallback"
-                }
-            return {
-                "verdict": "VERIFIED_CLEAN",
-                "visual_score": 8,
-                "visual_summary": f"Rendered layout verified with {dom_elements_count} DOM elements ({file_size_kb:.1f} KB visual payload).",
-                "defects": [],
-                "strengths": ["DOM tree rendered cleanly", f"Rich visual buffer ({file_size_kb:.1f} KB)"],
-                "model_used": "heuristic_fallback"
-            }
-
-        vision_url = "https://integrate.api.nvidia.com/v1/chat/completions"
-        vision_model = os.environ.get("NVIDIA_MODEL") or "meta/llama-3.2-11b-vision-instruct"
-
         prompt_text = (
             "You are frAIday's AI Visual QA Inspector. You must critically audit this rendered screenshot of a web application.\n"
             f"User Task / Goal: '{task}'\n"
@@ -2386,101 +2438,155 @@ class FrAIdayHandler(http.server.SimpleHTTPRequestHandler):
             "STRENGTHS: [List 1-2 positive visual layout aspects]\n"
         )
 
-        payload = {
-            "model": vision_model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt_text},
-                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}}
-                    ]
-                }
-            ],
-            "max_tokens": 400,
-            "temperature": 0.1
-        }
-
-        headers = {
-            "Authorization": f"Bearer {nv_key}",
-            "Content-Type": "application/json",
-            "User-Agent": "frAIday-Vision-Auditor/1.0"
-        }
-
         def clean_md(text):
             return re.sub(r'^\*+|\*+$', '', text.strip()).strip()
 
-        try:
-            req_data = json.dumps(payload).encode("utf-8")
-            req = urllib.request.Request(vision_url, data=req_data, headers=headers)
-            with urllib.request.urlopen(req, timeout=25) as resp:
-                res_data = json.loads(resp.read().decode("utf-8"))
-                raw_critique = res_data["choices"][0]["message"]["content"].strip()
-
-                verdict = "VERIFIED_CLEAN"
-                verdict_m = re.search(r'\*{0,2}VERDICT:\*{0,2}\s*([A-Za-z_]+)', raw_critique, re.IGNORECASE)
-                if verdict_m:
-                    v_str = verdict_m.group(1).upper()
-                    if "BLANK" in v_str:
-                        verdict = "BLANK_SCREEN"
-                    elif "DEFECT" in v_str or "ERROR" in v_str:
-                        verdict = "DEFECTS_DETECTED"
-                    else:
-                        verdict = "VERIFIED_CLEAN"
-
-                visual_score = 9
-                score_m = re.search(r'\*{0,2}VISUAL_SCORE:\*{0,2}\s*(\d+)', raw_critique, re.IGNORECASE)
-                if score_m:
-                    try:
-                        visual_score = int(score_m.group(1))
-                    except Exception:
-                        pass
-
-                summary = ""
-                summary_m = re.search(r'\*{0,2}SUMMARY:\*{0,2}\s*([\s\S]*?)(?=\*{0,2}DEFECTS:|\*{0,2}STRENGTHS:|$)', raw_critique, re.IGNORECASE)
-                if summary_m:
-                    summary = clean_md(summary_m.group(1))
-                if not summary:
-                    summary = raw_critique[:200]
-
-                defects = []
-                defects_m = re.search(r'\*{0,2}DEFECTS:\*{0,2}\s*([\s\S]*?)(?=\*{0,2}STRENGTHS:|$)', raw_critique, re.IGNORECASE)
-                if defects_m:
-                    defects_raw = clean_md(defects_m.group(1))
-                    if "none" not in defects_raw.lower() and len(defects_raw) > 2:
-                        defects = [clean_md(d.strip("-•* ")) for d in defects_raw.splitlines() if d.strip("-•* ")]
-                        if not defects:
-                            defects = [defects_raw]
-
-                strengths = []
-                strengths_m = re.search(r'\*{0,2}STRENGTHS:\*{0,2}\s*([\s\S]*?)$', raw_critique, re.IGNORECASE)
-                if strengths_m:
-                    strengths_raw = clean_md(strengths_m.group(1))
-                    strengths = [clean_md(s.strip("-•* ")) for s in strengths_raw.splitlines() if s.strip("-•* ") and "none" not in s.lower()]
-
-                if visual_score < 6 and verdict == "VERIFIED_CLEAN":
+        def parse_critique_block(raw_text, used_model):
+            verdict = "VERIFIED_CLEAN"
+            verdict_m = re.search(r'\*{0,2}VERDICT:\*{0,2}\s*([A-Za-z_]+)', raw_text, re.IGNORECASE)
+            if verdict_m:
+                v_str = verdict_m.group(1).upper()
+                if "BLANK" in v_str:
+                    verdict = "BLANK_SCREEN"
+                elif "DEFECT" in v_str or "ERROR" in v_str:
                     verdict = "DEFECTS_DETECTED"
+                else:
+                    verdict = "VERIFIED_CLEAN"
 
-                return {
-                    "verdict": verdict,
-                    "visual_score": visual_score,
-                    "visual_summary": summary,
-                    "defects": defects,
-                    "strengths": strengths,
-                    "model_used": vision_model,
-                    "raw_critique": raw_critique
-                }
-        except Exception as e:
-            print(f"[frAIday Vision] Error querying vision model: {e}")
-            file_size_kb = screenshot_path.stat().st_size / 1024.0
+            visual_score = 9
+            score_m = re.search(r'\*{0,2}VISUAL_SCORE:\*{0,2}\s*(\d+)', raw_text, re.IGNORECASE)
+            if score_m:
+                try:
+                    visual_score = int(score_m.group(1))
+                except Exception:
+                    pass
+
+            summary = ""
+            summary_m = re.search(r'\*{0,2}SUMMARY:\*{0,2}\s*([\s\S]*?)(?=\*{0,2}DEFECTS:|\*{0,2}STRENGTHS:|$)', raw_text, re.IGNORECASE)
+            if summary_m:
+                summary = clean_md(summary_m.group(1))
+            if not summary:
+                summary = raw_text[:200]
+
+            defects = []
+            defects_m = re.search(r'\*{0,2}DEFECTS:\*{0,2}\s*([\s\S]*?)(?=\*{0,2}STRENGTHS:|$)', raw_text, re.IGNORECASE)
+            if defects_m:
+                defects_raw = clean_md(defects_m.group(1))
+                if "none" not in defects_raw.lower() and len(defects_raw) > 2:
+                    defects = [clean_md(d.strip("-•* ")) for d in defects_raw.splitlines() if d.strip("-•* ")]
+                    if not defects:
+                        defects = [defects_raw]
+
+            strengths = []
+            strengths_m = re.search(r'\*{0,2}STRENGTHS:\*{0,2}\s*([\s\S]*?)$', raw_text, re.IGNORECASE)
+            if strengths_m:
+                strengths_raw = clean_md(strengths_m.group(1))
+                strengths = [clean_md(s.strip("-•* ")) for s in strengths_raw.splitlines() if s.strip("-•* ") and "none" not in s.lower()]
+
+            if visual_score < 6 and verdict == "VERIFIED_CLEAN":
+                verdict = "DEFECTS_DETECTED"
+
             return {
-                "verdict": "VERIFIED_CLEAN" if file_size_kb >= 4.0 else "BLANK_SCREEN",
-                "visual_score": 8 if file_size_kb >= 4.0 else 3,
-                "visual_summary": f"Rendered {dom_elements_count} DOM elements ({file_size_kb:.1f} KB visual payload). Vision API note: {e}.",
-                "defects": [] if file_size_kb >= 4.0 else ["Possible blank render"],
-                "strengths": ["DOM rendered cleanly"],
+                "verdict": verdict,
+                "visual_score": visual_score,
+                "visual_summary": summary,
+                "defects": defects,
+                "strengths": strengths,
+                "model_used": used_model,
+                "raw_critique": raw_text
+            }
+
+        # 1. Primary: Native Google Gemini 3.8 Flash Vision (Real Antigravity)
+        gemini_key = os.environ.get("GEMINI_API_KEY", "") or DEFAULT_GEMINI_KEY
+        if not gemini_key and ACTIVE_CONFIG.get("provider") == "gemini":
+            gemini_key = ACTIVE_CONFIG.get("api_key", "")
+
+        if gemini_key:
+            for g_model in ["gemini-3.8-flash", "gemini-3-flash-preview", "gemini-3.5-flash"]:
+                g_url = f"https://generativelanguage.googleapis.com/v1beta/models/{g_model}:generateContent?key={gemini_key}"
+                g_payload = {
+                    "contents": [{
+                        "parts": [
+                            {"inlineData": {"mimeType": "image/png", "data": img_b64}},
+                            {"text": prompt_text}
+                        ]
+                    }],
+                    "generationConfig": {
+                        "temperature": 0.2,
+                        "maxOutputTokens": 600
+                    }
+                }
+                for attempt in range(2):
+                    try:
+                        req_data = json.dumps(g_payload).encode("utf-8")
+                        req = urllib.request.Request(g_url, data=req_data, headers={"Content-Type": "application/json"})
+                        with urllib.request.urlopen(req, timeout=25) as resp:
+                            res_data = json.loads(resp.read().decode("utf-8"))
+                            raw_critique = res_data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                            print(f"[frAIday Vision] Verified by Google {g_model}!")
+                            return parse_critique_block(raw_critique, f"google/{g_model}")
+                    except Exception as ge:
+                        if attempt == 0:
+                            time.sleep(1.5)
+                            continue
+                        print(f"[frAIday Vision] Model {g_model} attempt failed: {ge}")
+
+        # 2. Secondary: NVIDIA NIM Vision
+        nv_key = os.environ.get("NVIDIA_API_KEY", "") or DEFAULT_NVIDIA_KEY
+        if not nv_key and ACTIVE_CONFIG.get("provider") == "nvidia":
+            nv_key = ACTIVE_CONFIG.get("api_key", "")
+
+        if nv_key:
+            vision_url = "https://integrate.api.nvidia.com/v1/chat/completions"
+            vision_model = os.environ.get("NVIDIA_MODEL") or "meta/llama-3.2-11b-vision-instruct"
+            payload = {
+                "model": vision_model,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt_text},
+                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}}
+                        ]
+                    }
+                ],
+                "max_tokens": 400,
+                "temperature": 0.1
+            }
+            headers = {
+                "Authorization": f"Bearer {nv_key}",
+                "Content-Type": "application/json",
+                "User-Agent": "frAIday-Vision-Auditor/1.0"
+            }
+            try:
+                req_data = json.dumps(payload).encode("utf-8")
+                req = urllib.request.Request(vision_url, data=req_data, headers=headers)
+                with urllib.request.urlopen(req, timeout=25) as resp:
+                    res_data = json.loads(resp.read().decode("utf-8"))
+                    raw_critique = res_data["choices"][0]["message"]["content"].strip()
+                    return parse_critique_block(raw_critique, vision_model)
+            except Exception as e:
+                print(f"[frAIday Vision] NVIDIA vision error: {e}")
+
+        # 3. Fallback Heuristic
+        file_size_kb = screenshot_path.stat().st_size / 1024.0
+        if file_size_kb < 3.0:
+            return {
+                "verdict": "BLANK_SCREEN",
+                "visual_score": 2,
+                "visual_summary": f"Screenshot file size ({file_size_kb:.1f} KB) indicates an empty or nearly blank canvas render.",
+                "defects": ["Rendered canvas contains minimal pixel data (possible white/black screen)"],
+                "strengths": [],
                 "model_used": "heuristic_fallback"
             }
+        return {
+            "verdict": "VERIFIED_CLEAN",
+            "visual_score": 8,
+            "visual_summary": f"Rendered layout verified with {dom_elements_count} DOM elements ({file_size_kb:.1f} KB visual payload).",
+            "defects": [],
+            "strengths": ["DOM tree rendered cleanly", f"Rich visual buffer ({file_size_kb:.1f} KB)"],
+            "model_used": "heuristic_fallback"
+        }
 
     def execute_browser_subagent(self, task="Inspect preview"):
         html_files = sorted(list(WORKSPACE_DIR.glob("**/*.html")), key=lambda p: (len(p.parts), p.name != "index.html"))

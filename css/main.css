@@ -226,7 +226,8 @@ html, body {
   flex-direction: column;
   z-index: 30;
   transition: width var(--transition-normal);
-  overflow: hidden;
+  overflow: visible;
+  position: relative;
 }
 
 #secondary-sidebar.collapsed {
@@ -301,14 +302,14 @@ html, body {
 }
 
 .canvas-tab {
-  height: 30px;
-  padding: 0 9px;
+  height: 31px;
+  padding: 0 11px;
   display: flex;
   align-items: center;
-  gap: 5px;
-  font-size: 11.5px;
+  gap: 7px;
+  font-size: 12px;
   font-weight: 500;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   background: transparent;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
@@ -316,6 +317,12 @@ html, body {
   transition: all var(--transition-fast);
   white-space: nowrap;
   flex-shrink: 0;
+  user-select: none;
+}
+
+.canvas-tab svg {
+  opacity: 0.65;
+  transition: all var(--transition-fast);
 }
 
 .canvas-tab:hover {
@@ -323,19 +330,32 @@ html, body {
   background: rgba(255, 255, 255, 0.05);
 }
 
+.canvas-tab:hover svg {
+  opacity: 1;
+}
+
 .canvas-tab.active {
-  color: var(--text-primary);
-  background: rgba(56, 189, 248, 0.14);
-  border: 1px solid rgba(56, 189, 248, 0.35);
+  color: #f8fafc;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.32);
   font-weight: 600;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+.canvas-tab.active svg {
+  color: var(--accent-cyan);
+  opacity: 1;
+  filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.4));
 }
 
 .canvas-tab-pill {
   font-size: 10px;
-  padding: 2px 6px;
+  padding: 1px 6px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.08);
-  font-weight: 600;
+  background: rgba(56, 189, 248, 0.2);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  font-weight: 700;
 }
 
 .canvas-view-container {

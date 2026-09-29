@@ -967,7 +967,32 @@ class AppCoordinator {
           (!sidebarAddBtn || !sidebarAddBtn.contains(e.target))) {
         this.closeWorkspaceDropdown();
       }
+      
+      const projectContainer = document.getElementById('project-menu-container');
+      if (projectContainer && !projectContainer.contains(e.target)) {
+        const pm = document.getElementById('project-dropdown-menu');
+        if (pm) pm.style.display = 'none';
+        projectContainer.classList.remove('open');
+      }
     });
+
+    // Project Actions Dropdown Menu Toggle
+    const projectBtn = document.getElementById('btn-project-menu');
+    const projectMenu = document.getElementById('project-dropdown-menu');
+    const projectMenuWrap = document.getElementById('project-menu-container');
+    if (projectBtn && projectMenu) {
+      projectBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isShown = projectMenu.style.display !== 'none';
+        projectMenu.style.display = isShown ? 'none' : 'flex';
+        if (projectMenuWrap) projectMenuWrap.classList.toggle('open', !isShown);
+      });
+
+      projectMenu.addEventListener('click', () => {
+        projectMenu.style.display = 'none';
+        if (projectMenuWrap) projectMenuWrap.classList.remove('open');
+      });
+    }
 
     // Run Mission Button
     const runBtn = document.getElementById('btn-run-mission');

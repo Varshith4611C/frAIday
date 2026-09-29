@@ -26,105 +26,94 @@
        TOP HUD BAR: Real Production Brand, Workspace Path, Model & Controls
        ========================================================================== -->
   <header id="top-hud">
-    <!-- Brand & Engine Title -->
-    <div class="hud-brand">
-      <div class="brand-icon">⚡</div>
-      <div class="brand-text">
-        <span>frAIday</span>
-        <span class="brand-tag">PROD RUNTIME</span>
-      </div>
-    </div>
-
-    <!-- Active Real Workspace Root & Switcher -->
-    <div class="workspace-pill-container" id="workspace-pill-container">
-      <div id="hud-workspace-pill" class="workspace-switcher-pill" title="Click to switch, create, or manage workspaces">
-        <span style="color:#38bdf8;font-size:12px;">📁</span>
-        <span id="hud-workspace-label" style="font-family:var(--font-mono);font-size:11.5px;color:#e2e8f0;">workspace: <strong id="hud-active-workspace-name" style="color:#38bdf8;">default</strong></span>
-        <span style="font-size:10px;color:#94a3b8;margin-left:2px;">▾</span>
-      </div>
-
-      <!-- Dropdown Menu for Workspaces -->
-      <div id="workspace-dropdown-menu" class="workspace-dropdown" style="display:none;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.08);">
-          <span style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.5px;">Project Workspaces</span>
-          <button id="btn-show-new-workspace" class="btn btn-primary btn-xs" style="padding:2px 8px;font-size:11px;">+ New</button>
-        </div>
-
-        <!-- Inline New Workspace Input -->
-        <div id="new-workspace-input-row" style="display:none;margin-bottom:10px;padding:8px;background:rgba(255,255,255,0.03);border:1px dashed rgba(56,189,248,0.3);border-radius:6px;">
-          <input type="text" id="input-new-workspace-name" placeholder="Workspace name (e.g. calculator)..." style="width:100%;background:rgba(0,0,0,0.3);border:1px solid rgba(56,189,248,0.3);border-radius:4px;padding:5px 8px;color:#f8fafc;font-size:11px;outline:none;margin-bottom:6px;" />
-          <div style="display:flex;justify-content:flex-end;gap:6px;">
-            <button id="btn-cancel-new-workspace" class="btn btn-secondary btn-xs">Cancel</button>
-            <button id="btn-create-workspace-confirm" class="btn btn-primary btn-xs">Create & Switch</button>
-          </div>
-        </div>
-
-        <!-- Workspace List -->
-        <div id="workspace-list-container" style="display:flex;flex-direction:column;gap:5px;max-height:260px;overflow-y:auto;">
-          <!-- Dynamically populated -->
+    <!-- Left: Brand & Engine Lifecycle Status -->
+    <div class="hud-left">
+      <div class="hud-brand">
+        <div class="brand-icon">⚡</div>
+        <div class="brand-text">
+          <span>frAIday</span>
+          <span class="brand-tag">PROD</span>
         </div>
       </div>
-    </div>
 
-    <!-- Live Execution Status Pill -->
-    <div id="status-pill" class="execution-status-pill status-idle">
-      <span class="status-dot"></span>
-      <span class="status-label">System Idle</span>
+      <div class="hud-divider"></div>
+
+      <!-- Live Execution Status Pill -->
+      <div id="status-pill" class="execution-status-pill status-idle">
+        <span class="status-dot"></span>
+        <span class="status-label">System Idle</span>
+      </div>
     </div>
 
     <!-- Controls, Model & Actions -->
     <div class="hud-actions">
       <!-- Model Indicator Pill -->
-      <div class="stat-pill" id="hud-model-pill" style="cursor:pointer;" title="Click to configure AI Models & Providers" onclick="window.openSettingsModalFallback()">
-        <span style="color:#10b981;">●</span>
-        <span id="hud-model-name" style="font-weight:600;color:#e2e8f0;font-size:11px;">Groq (GPT OSS 20B)</span>
+      <div class="stat-pill" id="hud-model-pill" title="Configure AI Models & Providers" onclick="window.openSettingsModalFallback()">
+        <span class="status-indicator-dot" style="background:#10b981;box-shadow:0 0 6px rgba(16,185,129,0.6);"></span>
+        <span id="hud-model-name" class="stat-pill-text">Groq (GPT OSS 120B)</span>
       </div>
 
       <!-- Vectorize Hindsight Memory Indicator Pill -->
-      <div class="stat-pill" id="hud-hindsight-pill" style="cursor:pointer;background:rgba(56,189,248,0.12);border-color:rgba(56,189,248,0.35);" title="Click to open Vectorize Hindsight Memory Engine & Benchmarks" onclick="window.fraidayApp?.switchTab('hindsight')">
+      <div class="stat-pill" id="hud-hindsight-pill" title="Vectorize Hindsight Memory Engine" onclick="window.fraidayApp?.switchTab('hindsight')">
         <span style="font-size:12px;">🧠</span>
-        <span id="hud-hindsight-label" style="font-weight:700;color:#38bdf8;font-size:11px;">Hindsight: Active (10 Mems)</span>
+        <span id="hud-hindsight-label" class="stat-pill-text">Hindsight: Active (0 Mems)</span>
       </div>
 
-      <!-- Settings & API Key Button -->
+      <div class="hud-divider"></div>
+
+      <button id="btn-toggle-terminal-hud" style="display:none;"></button>
+
+      <!-- Consolidated Project Actions Dropdown (Export, Checkpoints, Install, Clear) -->
+      <div class="dropdown-wrapper" id="project-menu-container">
+        <button id="btn-project-menu" class="btn btn-secondary btn-sm" title="Project Actions & Utilities">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+          <span>Project</span>
+          <svg class="dropdown-caret-svg" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </button>
+
+        <div id="project-dropdown-menu" class="action-dropdown" style="display:none;">
+          <div class="dropdown-header">Project Utilities</div>
+          <button id="btn-export-zip" class="dropdown-item" title="Download entire workspace as a ZIP archive">
+            <span class="dropdown-item-icon">📦</span>
+            <div class="dropdown-item-content">
+              <span class="dropdown-item-title">Export ZIP</span>
+              <span class="dropdown-item-desc">Download complete workspace</span>
+            </div>
+          </button>
+          <button id="btn-checkpoints" class="dropdown-item" title="Workspace Time-Machine & Rollback Checkpoints">
+            <span class="dropdown-item-icon">⏱️</span>
+            <div class="dropdown-item-content">
+              <span class="dropdown-item-title">Checkpoints</span>
+              <span class="dropdown-item-desc">Time-Machine & snapshots</span>
+            </div>
+          </button>
+          <button id="btn-run-deps" class="dropdown-item" title="Run pip install or npm install">
+            <span class="dropdown-item-icon">📥</span>
+            <div class="dropdown-item-content">
+              <span class="dropdown-item-title">Install Dependencies</span>
+              <span class="dropdown-item-desc">Run package.json or requirements</span>
+            </div>
+          </button>
+          <div class="dropdown-divider"></div>
+          <button id="btn-clear-workspace" class="dropdown-item dropdown-item-danger" title="Reset and empty ./workspace/">
+            <span class="dropdown-item-icon">🗑️</span>
+            <div class="dropdown-item-content">
+              <span class="dropdown-item-title">Clear Workspace</span>
+              <span class="dropdown-item-desc">Wipe all generated files</span>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      <!-- Settings Button -->
       <button id="btn-open-settings" class="btn btn-secondary btn-sm" title="Configure LLM API Keys & Providers" onclick="window.openSettingsModalFallback()">
-        ⚙️ Settings
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+        <span>Settings</span>
       </button>
 
-      <!-- Clear Workspace Button -->
-      <button id="btn-clear-workspace" class="btn btn-danger-outline btn-sm" title="Reset and empty ./workspace/">
-        🗑️ Clear
-      </button>
-
-      <!-- Terminal Quick Button -->
-      <button id="btn-toggle-terminal-hud" class="btn btn-secondary btn-sm" title="Toggle Workspace Terminal" style="display:flex;align-items:center;gap:4px;">
-        <span>💻</span> <span>Terminal</span>
-      </button>
-
-      <!-- Export ZIP Button -->
-      <button id="btn-export-zip" class="btn btn-secondary btn-sm" title="Export entire workspace as a downloadable ZIP archive" style="display:flex;align-items:center;gap:4px;">
-        <span>📦</span> <span>Export ZIP</span>
-      </button>
-
-      <!-- Checkpoints / Time-Machine Button -->
-      <button id="btn-checkpoints" class="btn btn-secondary btn-sm" title="Workspace Time-Machine & Rollback Checkpoints" style="display:flex;align-items:center;gap:4px;">
-        <span>⏱️</span> <span>Checkpoints</span>
-      </button>
-
-      <!-- Install Dependencies Button -->
-      <button id="btn-run-deps" class="btn btn-secondary btn-sm" title="Run pip install on requirements.txt or npm install" style="display:flex;align-items:center;gap:4px;">
-        📦 <span>Install Deps</span>
-      </button>
-
-      <!-- Stop Button (Visible when running) -->
-      <button id="btn-stop-execution" class="btn btn-danger btn-sm" style="display:none;align-items:center;gap:4px;" title="Abort ongoing execution">
-        ⏹ <span>Stop Execution</span>
-      </button>
-
-      <!-- Run Button -->
-      <button id="btn-run-mission" class="btn btn-primary btn-sm">
-        ▶ Run Intent
-      </button>
+      <!-- Hidden hook placeholders to preserve scripts safely -->
+      <button id="btn-stop-execution" style="display:none;"></button>
+      <button id="btn-run-mission" style="display:none;"></button>
     </div>
   </header>
 
@@ -141,7 +130,7 @@
         </button>
 
         <button class="activity-btn" data-panel="hindsight" id="activity-btn-hindsight" title="Vectorize Hindsight Memory Bank & Benchmarks" style="color:#38bdf8;">
-          <span style="font-size:16px;">🧠</span>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7z"></path><path d="M9 21h6"></path></svg>
         </button>
 
         <button class="activity-btn" data-panel="knowledge" title="Discovered Web Docs & RFCs">
@@ -168,15 +157,43 @@
 
     <!-- 2. Left Secondary Sidebar -->
     <aside id="secondary-sidebar">
-      <div class="sidebar-header" style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
-        <div style="display:flex;align-items:center;gap:6px;overflow:hidden;">
-          <span id="sidebar-panel-title" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Files</span>
-          <span id="sidebar-active-workspace-badge" class="badge badge-accent" style="font-size:10px;padding:1px 6px;cursor:pointer;" title="Click to switch workspace">default</span>
+      <div class="sidebar-header" style="display:flex;align-items:center;justify-content:space-between;gap:6px;position:relative;">
+        <span id="sidebar-panel-title" style="font-weight:700;color:#94a3b8;font-size:11px;letter-spacing:0.5px;">EXPLORER</span>
+
+        <!-- Active Real Workspace Switcher (Moved to right side of file manager) -->
+        <div class="workspace-pill-container" id="workspace-pill-container" style="position:relative;">
+          <div id="hud-workspace-pill" class="workspace-switcher-pill" title="Click to switch, create, or manage workspaces" style="padding:2px 7px;font-size:11px;gap:5px;cursor:pointer;display:flex;align-items:center;background:rgba(56,189,248,0.1);border:1px solid rgba(56,189,248,0.3);border-radius:5px;">
+            <span style="color:#38bdf8;font-size:11px;">📁</span>
+            <span id="hud-workspace-label" style="font-family:var(--font-mono);font-size:11px;color:#e2e8f0;"><strong id="hud-active-workspace-name" style="color:#38bdf8;">default</strong></span>
+            <span style="font-size:9px;color:#94a3b8;margin-left:1px;">▾</span>
+          </div>
+
+          <!-- Dropdown Menu for Workspaces -->
+          <div id="workspace-dropdown-menu" class="workspace-dropdown" style="display:none;position:absolute;top:calc(100% + 6px);right:0;left:auto;width:240px;box-shadow:0 12px 32px rgba(0,0,0,0.85);z-index:9999;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid rgba(255,255,255,0.08);">
+              <span style="font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.5px;">Workspaces</span>
+              <button id="btn-show-new-workspace" class="btn btn-primary btn-xs" style="padding:2px 7px;font-size:10px;">+ New</button>
+            </div>
+
+            <!-- Inline New Workspace Input -->
+            <div id="new-workspace-input-row" style="display:none;margin-bottom:8px;padding:6px;background:rgba(255,255,255,0.03);border:1px dashed rgba(56,189,248,0.3);border-radius:6px;">
+              <input type="text" id="input-new-workspace-name" placeholder="Workspace name..." style="width:100%;background:rgba(0,0,0,0.3);border:1px solid rgba(56,189,248,0.3);border-radius:4px;padding:4px 6px;color:#f8fafc;font-size:11px;outline:none;margin-bottom:6px;" />
+              <div style="display:flex;justify-content:flex-end;gap:5px;">
+                <button id="btn-cancel-new-workspace" class="btn btn-secondary btn-xs" style="padding:1px 6px;font-size:10px;">Cancel</button>
+                <button id="btn-create-workspace-confirm" class="btn btn-primary btn-xs" style="padding:1px 6px;font-size:10px;">Create</button>
+              </div>
+            </div>
+
+            <!-- Workspace List -->
+            <div id="workspace-list-container" style="display:flex;flex-direction:column;gap:4px;max-height:220px;overflow-y:auto;">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
         </div>
-        <div style="display:flex;align-items:center;gap:4px;">
-          <button id="btn-sidebar-add-workspace" class="btn btn-icon btn-xs" title="Create New Workspace" style="width:20px;height:20px;padding:0;font-size:12px;display:flex;align-items:center;justify-content:center;color:#38bdf8;">+</button>
-          <span class="brand-tag">real-fs</span>
-        </div>
+
+        <!-- Hidden badges for backward-compatibility -->
+        <span id="sidebar-active-workspace-badge" style="display:none;">default</span>
+        <button id="btn-sidebar-add-workspace" style="display:none;"></button>
       </div>
       <div class="sidebar-content">
         <!-- Panel 1: File Tree -->
@@ -229,28 +246,28 @@
       <div class="canvas-tabs-bar">
         <div class="canvas-tabs-group">
           <button class="canvas-tab active" data-tab="preview" id="canvas-tab-preview" title="Live Preview">
-            <span>🖥️</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
             <span>Preview</span>
           </button>
           <button class="canvas-tab" data-tab="code" id="canvas-tab-code" title="Code Editor & Diff">
-            <span>📝</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
             <span>Code</span>
           </button>
           <button class="canvas-tab" data-tab="artifacts" id="canvas-tab-artifacts" title="Implementation Plan & Artifacts">
-            <span>📋</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
             <span>Plan</span>
             <span class="canvas-tab-pill" id="artifacts-badge" style="display:none;background:#38bdf8;color:#0f172a;font-weight:700;">Review</span>
           </button>
           <button class="canvas-tab" data-tab="dag" id="canvas-tab-dag" title="Execution DAG">
-            <span>🕸️</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
             <span>DAG</span>
           </button>
           <button class="canvas-tab" data-tab="terminal" id="canvas-tab-terminal" title="Workspace Terminal">
-            <span>💻</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
             <span>Terminal</span>
           </button>
           <button class="canvas-tab" data-tab="hindsight" id="canvas-tab-hindsight" title="Vectorize Hindsight Memory Bank">
-            <span>🧠</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7z"></path><path d="M9 21h6"></path></svg>
             <span>Hindsight</span>
             <span class="canvas-tab-pill" id="hindsight-pill-badge" style="display:none;background:rgba(56,189,248,0.2);color:#38bdf8;border:1px solid rgba(56,189,248,0.4);font-weight:700;">Active</span>
           </button>
@@ -262,24 +279,6 @@
         <!-- View 1: Real Live Preview Iframe -->
         <div class="canvas-view active" data-view="preview">
           <div class="preview-wrapper">
-            <!-- Toolbar -->
-            <div class="preview-toolbar">
-              <div class="preview-address-bar">
-                <span>🌐</span>
-                <span class="preview-address-text" id="preview-address-display">http://localhost:8080/workspace/index.html</span>
-              </div>
-              <div class="preview-viewport-controls">
-                <button class="viewport-btn active" data-vp="desktop" title="Desktop Viewport">Desktop</button>
-                <button class="viewport-btn" data-vp="tablet" title="Tablet Viewport (768px)">Tablet</button>
-                <button class="viewport-btn" data-vp="mobile" title="Mobile Viewport (375px)">Mobile</button>
-              </div>
-              <div style="display:flex;gap:6px;">
-                <button id="btn-view-screenshot" class="btn btn-secondary btn-sm" title="View Headless Chrome Visual Audit Snapshot" style="border-color:rgba(56,189,248,0.4);color:#38bdf8;">📸 Audit Snapshot</button>
-                <button id="btn-reload-preview" class="btn btn-secondary btn-sm" title="Reload Live Preview">↻ Reload</button>
-                <button id="btn-popout-preview" class="btn btn-secondary btn-sm" title="Open Preview in New Tab">↗ Pop Out</button>
-              </div>
-            </div>
-
             <!-- Frame Container -->
             <div class="preview-frame-container">
               <div class="preview-empty-state" id="preview-empty-state">
@@ -427,8 +426,12 @@
           <div class="slash-item" data-cmd="/clear"><span class="slash-name">/clear</span><span class="slash-desc">Reset and wipe all workspace files</span></div>
         </div>
         <div class="context-input-box">
-          <input type="text" id="contextual-prompt-input" class="context-input" placeholder="Type / for commands, or ask frAIday..." autocomplete="off" />
-          <button id="btn-send-context-prompt" class="btn btn-primary btn-sm" style="padding:4px 12px;white-space:nowrap;">Execute</button>
+          <span class="cmd-pill" title="Type / for quick commands">/</span>
+          <input type="text" id="contextual-prompt-input" class="context-input" placeholder="Ask frAIday, or type / for commands..." autocomplete="off" />
+          <button id="btn-send-context-prompt" class="btn btn-primary btn-sm" style="padding:4px 14px;white-space:nowrap;gap:4px;">
+            <span>Execute</span>
+            <span style="font-size:10px;opacity:0.8;">↵</span>
+          </button>
           <button id="btn-stop-context-prompt" class="btn btn-danger btn-sm" style="display:none;padding:4px 12px;white-space:nowrap;">⏹ Stop</button>
         </div>
       </div>

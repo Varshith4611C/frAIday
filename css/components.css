@@ -4,10 +4,17 @@
    ========================================================================== */
 
 /* Top HUD Elements */
+.hud-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .hud-brand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
+  user-select: none;
 }
 
 .brand-icon {
@@ -19,7 +26,9 @@
   align-items: center;
   justify-content: center;
   color: white;
-  box-shadow: var(--glow-cyan);
+  font-size: 13px;
+  box-shadow: 0 0 14px rgba(56, 189, 248, 0.35);
+  flex-shrink: 0;
 }
 
 .brand-text {
@@ -31,77 +40,49 @@
   -webkit-text-fill-color: transparent;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
 }
 
 .brand-tag {
   font-size: 9px;
   padding: 2px 6px;
-  background: rgba(56, 189, 248, 0.15);
-  border: 1px solid rgba(56, 189, 248, 0.3);
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.28);
   border-radius: 4px;
   color: var(--accent-cyan);
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
-}
-
-/* Mission Selector */
-.mission-selector-wrapper {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: rgba(22, 32, 50, 0.6);
-  border: 1px solid var(--border-medium);
-  border-radius: var(--radius-md);
-  padding: 4px 12px;
-  transition: all var(--transition-fast);
-}
-
-.mission-selector-wrapper:hover {
-  border-color: rgba(56, 189, 248, 0.4);
-}
-
-.mission-select {
-  background: transparent;
-  border: none;
-  color: var(--text-primary);
-  font-family: var(--font-sans);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  outline: none;
-}
-
-.mission-select option {
-  background: var(--bg-secondary);
-  color: var(--text-primary);
 }
 
 /* Lifecycle Execution Pill */
 .execution-status-pill {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 5px 12px;
-  border-radius: var(--radius-full);
-  background: rgba(17, 24, 39, 0.9);
+  height: 30px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(15, 23, 42, 0.75);
   border: 1px solid var(--border-subtle);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
   box-shadow: var(--shadow-sm);
   transition: all var(--transition-normal);
+  user-select: none;
+  white-space: nowrap;
 }
 
 .status-dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--status-idle);
   box-shadow: 0 0 8px currentColor;
   transition: all var(--transition-normal);
+  flex-shrink: 0;
 }
 
 .execution-status-pill.status-idle .status-dot { background: var(--status-idle); color: var(--status-idle); }
@@ -127,12 +108,28 @@
   gap: 8px;
 }
 
+.hud-divider {
+  width: 1px;
+  height: 18px;
+  background: rgba(255, 255, 255, 0.14);
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+
+.status-indicator-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 6px 14px;
+  padding: 5px 12px;
   border-radius: var(--radius-sm);
   font-size: 12px;
   font-weight: 600;
@@ -165,13 +162,23 @@
 }
 
 .btn-secondary {
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.05);
   border-color: var(--border-medium);
   color: var(--text-primary);
 }
 .btn-secondary:hover {
   background: rgba(255, 255, 255, 0.1);
   border-color: var(--border-strong);
+}
+
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-secondary);
+}
+.btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-primary);
 }
 
 .btn-amber {
@@ -195,6 +202,14 @@
   height: 32px;
 }
 
+.stop-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: #fff;
+  display: inline-block;
+}
+
 /* Autonomy Mode Selector */
 .policy-dropdown {
   background: rgba(255, 255, 255, 0.05);
@@ -211,17 +226,169 @@
   color: var(--text-primary);
 }
 
-/* Speed / Token Pills */
+/* Speed / Token / Model / Hindsight Pills */
 .stat-pill {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 5px;
-  font-size: 11px;
-  color: var(--text-muted);
-  background: rgba(255, 255, 255, 0.03);
-  padding: 4px 8px;
+  gap: 7px;
+  height: 30px;
+  padding: 0 11px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.035);
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-subtle);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  user-select: none;
+  white-space: nowrap;
+}
+
+.stat-pill:hover {
+  background: rgba(255, 255, 255, 0.075);
+  border-color: var(--border-medium);
+  color: var(--text-primary);
+}
+
+.stat-pill-text {
+  font-weight: 500;
+  font-size: 11.5px;
+}
+
+/* Header Action Buttons */
+#btn-project-menu,
+#btn-open-settings {
+  height: 30px;
+  padding: 0 12px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid var(--border-medium);
+  color: var(--text-primary);
+  transition: all var(--transition-fast);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+#btn-project-menu:hover,
+#btn-open-settings:hover {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: var(--border-strong);
+  color: #ffffff;
+}
+
+.dropdown-caret-svg {
+  color: var(--text-muted);
+  transition: transform var(--transition-fast);
+  margin-left: 2px;
+  flex-shrink: 0;
+}
+
+.dropdown-wrapper.open .dropdown-caret-svg {
+  transform: rotate(180deg);
+}
+
+/* Project Actions Dropdown Menu */
+.dropdown-wrapper {
+  position: relative;
+}
+
+.action-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 250px;
+  background: rgba(15, 23, 42, 0.97);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  padding: 6px;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.7), 0 0 20px rgba(56, 189, 248, 0.12);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  z-index: 1000;
+  animation: wsDropdownFadeIn 0.15s ease-out;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dropdown-header {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  padding: 6px 10px 4px;
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  text-align: left;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.dropdown-item:hover {
+  background: rgba(56, 189, 248, 0.1);
+  border-color: rgba(56, 189, 248, 0.25);
+}
+
+.dropdown-item-icon {
+  font-size: 15px;
+  width: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.dropdown-item-content {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.dropdown-item-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #f1f5f9;
+  line-height: 1.2;
+}
+
+.dropdown-item-desc {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  line-height: 1.2;
+  margin-top: 2px;
+}
+
+.dropdown-divider {
+  height: 1px;
+  background: var(--border-subtle);
+  margin: 4px 6px;
+}
+
+.dropdown-item-danger:hover {
+  background: rgba(244, 63, 94, 0.14);
+  border-color: rgba(244, 63, 94, 0.35);
+}
+
+.dropdown-item-danger:hover .dropdown-item-title {
+  color: #fb7185;
 }
 
 /* Agent Cockpit Stream Items */
@@ -481,16 +648,36 @@
 .context-input-box {
   display: flex;
   align-items: center;
-  background: rgba(22, 32, 50, 0.85);
+  gap: 8px;
+  background: rgba(18, 26, 42, 0.85);
   border: 1px solid var(--border-medium);
   border-radius: var(--radius-md);
-  padding: 6px 10px;
+  padding: 5px 8px 5px 10px;
   transition: all var(--transition-fast);
 }
 
 .context-input-box:focus-within {
   border-color: var(--accent-cyan);
-  box-shadow: 0 0 12px rgba(56, 189, 248, 0.25);
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.25);
+  background: rgba(22, 32, 52, 0.95);
+}
+
+.cmd-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-subtle);
+  color: #94a3b8;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: default;
+  user-select: none;
+  flex-shrink: 0;
 }
 
 .context-input {

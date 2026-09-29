@@ -101,7 +101,7 @@ flowchart TD
 
     subgraph UI HUD
         HS_Bank -.-> VisualHUD[Hindsight Visual Memory Inspector]
-        VisualHUD -.-> DemoToggle[1-Click Before vs After Toggle]
+        VisualHUD -.-> ModeToggle[Memory Mode Switcher]
     end
 ```
 

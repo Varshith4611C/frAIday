@@ -4,9 +4,8 @@
  * Features:
  * 1. Live Memory Stream (Real-time recall & retain telemetry)
  * 2. 4-Tier Memory Bank Explorer (Mental Models, Observations, World Facts, Experience Facts)
- * 3. Before/After Demo Mode Switcher (Stateless Baseline vs Hindsight Learning)
- * 4. 1-Click Interactive Hackathon Scenarios
- * 5. Autonomous Reflection Playground
+ * 3. Before/After Mode Switcher (Stateless Baseline vs Hindsight Learning)
+ * 4. Autonomous Reflection Playground
  */
 
 export class HindsightInspector {
@@ -24,36 +23,7 @@ export class HindsightInspector {
     this.recallStream = [];
     this.reflectionResult = null;
     this.isReflecting = false;
-
-    this.scenarios = [
-      {
-        id: 'scenario-db-port',
-        title: 'Incident INC-104: Database Port & SSL Trap',
-        icon: '🐘',
-        category: 'DevOps / Database',
-        prompt: 'Configure database connection settings for local PostgreSQL service and write a quick connection verification test.',
-        statelessOutcome: 'Fails with ConnectionRefusedError: defaults to port 5432 with sslmode=require (ignores repo Docker port mapping).',
-        hindsightOutcome: 'Succeeds immediately: recalls Mental Model #1 + INC-104 post-mortem (uses port 5433, sslmode=disable).'
-      },
-      {
-        id: 'scenario-pydantic-v2',
-        title: 'Modern Pydantic v2 Migration Standard',
-        icon: '⚡',
-        category: 'Code Conventions',
-        prompt: 'Create user registration data schema and validator with Pydantic for user auth flow.',
-        statelessOutcome: 'Uses outdated Pydantic v1 syntax (class Config: orm_mode=True, .dict()) causing deprecation errors.',
-        hindsightOutcome: 'Recalls Mental Model #2: writes modern model_config = ConfigDict(from_attributes=True) and .model_dump().'
-      },
-      {
-        id: 'scenario-devops-cors',
-        title: 'Workspace Web Server CORS & Health Protocol',
-        icon: '🌐',
-        category: 'Security / Architecture',
-        prompt: 'Write a lightweight Python HTTP server in ./workspace/ with a /users endpoint for frontend consumption.',
-        statelessOutcome: 'Omits CORS headers and OPTIONS handler, causing browser iframe preview to block API requests.',
-        hindsightOutcome: 'Recalls Mental Model #3: automatically adds Access-Control-Allow-Origin: * and /health probe.'
-      }
-    ];
+    this.scenarios = [];
 
     this.init();
   }
@@ -184,7 +154,7 @@ export class HindsightInspector {
               <span>🔄</span> Reset Memory Bank
             </button>
             <!-- Mode Toggle Switch -->
-            <div class="hs-mode-switcher ${this.isHindsightEnabled ? 'mode-active' : 'mode-baseline'}" title="Toggle between Hindsight Learning Agent and Stateless Baseline Agent for demo comparison">
+            <div class="hs-mode-switcher ${this.isHindsightEnabled ? 'mode-active' : 'mode-baseline'}" title="Toggle between Hindsight Learning Agent and Stateless Baseline Agent">
               <span class="hs-mode-label">${this.isHindsightEnabled ? '● Hindsight Active' : '○ Stateless Baseline'}</span>
               <button class="hs-toggle-btn" id="hs-btn-toggle-mode">
                 ${this.isHindsightEnabled ? 'Switch to Baseline' : 'Enable Hindsight'}
@@ -196,7 +166,7 @@ export class HindsightInspector {
         <!-- Mode Advisory Alert -->
         ${!this.isHindsightEnabled ? `
           <div class="hs-banner-stateless">
-            <strong>⚠️ STATELESS BASELINE DEMO MODE ACTIVE</strong>: Memory injection is bypassed. The agent operates without memory across sessions (demonstrating how standard AI models repeat past mistakes).
+            <strong>⚠️ STATELESS BASELINE MODE ACTIVE</strong>: Memory injection is bypassed. The agent operates without memory across sessions.
           </div>
         ` : `
           <div class="hs-banner-hindsight">
@@ -228,44 +198,7 @@ export class HindsightInspector {
           </div>
         </div>
 
-        <!-- Section 1: Interactive Hackathon Scenarios -->
-        <div class="hs-section">
-          <div class="hs-section-header">
-            <div class="hs-section-title">
-              <span>🚀</span> 1-Click Hackathon Demo Scenarios
-            </div>
-            <button class="btn btn-secondary btn-xs" id="hs-btn-reset-scenarios" title="Reset bank to initial benchmark state">
-              ↺ Reset Bank
-            </button>
-          </div>
-          <div class="hs-scenarios-grid">
-            ${this.scenarios.map(s => `
-              <div class="hs-scenario-card" data-id="${s.id}">
-                <div class="hs-sc-head">
-                  <span class="hs-sc-icon">${s.icon}</span>
-                  <div>
-                    <div class="hs-sc-title">${s.title}</div>
-                    <div class="hs-sc-cat">${s.category}</div>
-                  </div>
-                </div>
-                <div class="hs-sc-prompt">"${s.prompt}"</div>
-                <div class="hs-sc-comparison">
-                  <div class="hs-sc-comp-item stateless">
-                    <span class="tag">Without Memory:</span> ${s.statelessOutcome}
-                  </div>
-                  <div class="hs-sc-comp-item hindsight">
-                    <span class="tag">With Hindsight:</span> ${s.hindsightOutcome}
-                  </div>
-                </div>
-                <button class="btn btn-primary btn-sm hs-btn-run-sc" data-id="${s.id}">
-                  ▶ Load Objective into frAIday
-                </button>
-              </div>
-            `).join('')}
-          </div>
-        </div>
-
-        <!-- Section 2: Live Memory Stream -->
+        <!-- Section 1: Live Memory Stream -->
         <div class="hs-section">
           <div class="hs-section-header">
             <div class="hs-section-title">
@@ -278,7 +211,7 @@ export class HindsightInspector {
           </div>
         </div>
 
-        <!-- Section 3: 4-Tier Memory Bank Explorer -->
+        <!-- Section 2: 4-Tier Memory Bank Explorer -->
         <div class="hs-section">
           <div class="hs-section-header">
             <div class="hs-section-title">
@@ -297,7 +230,7 @@ export class HindsightInspector {
           </div>
         </div>
 
-        <!-- Section 4: Reflection Playground -->
+        <!-- Section 3: Reflection Playground -->
         <div class="hs-section" style="margin-bottom:24px;">
           <div class="hs-section-header">
             <div class="hs-section-title">
@@ -335,7 +268,7 @@ export class HindsightInspector {
     if (!this.recallStream || this.recallStream.length === 0) {
       return `
         <div class="hs-empty-stream">
-          <span>💤</span> No live recalls executed yet. Run any mission or click a demo scenario above to view real-time Hindsight TEMPR retrieval pulses.
+          <span>💤</span> No live recalls executed yet. Run any mission or enter a prompt in the chat to view real-time Hindsight TEMPR retrieval pulses.
         </div>
       `;
     }
@@ -491,18 +424,7 @@ export class HindsightInspector {
       });
     }
 
-    // Scenario Launchers
-    this.container.querySelectorAll('.hs-btn-run-sc').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        const scId = e.currentTarget.getAttribute('data-id');
-        const scenario = this.scenarios.find(s => s.id === scId);
-        if (scenario && this.onRunScenario) {
-          this.onRunScenario(scenario.prompt, this.isHindsightEnabled);
-        }
-      });
-    });
-
-    // Reset Scenarios
+    // Reset Memory Bank
     const btnReset = this.container.querySelector('#hs-btn-reset-scenarios');
     if (btnReset) {
       btnReset.addEventListener('click', () => this.resetScenarios());

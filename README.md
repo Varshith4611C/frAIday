@@ -11,7 +11,7 @@
 
 **The Autonomous Software Engineering & SRE Incident Agent with Persistent Biomimetic Memory That Actually Learns Over Time.**
 
-[Quickstart](#-quickstart) • [Why Hindsight?](#-why-vectorize-hindsight) • [Architecture](#-architecture) • [Demo Scenarios](#-1-click-hackathon-demo-scenarios) • [Submission Kit](HACKATHON_SUBMISSION_KIT.md)
+[Quickstart](#-quickstart) • [Why Hindsight?](#-why-vectorize-hindsight) • [Architecture](#-architecture) • [Submission Kit](HACKATHON_SUBMISSION_KIT.md)
 
 </div>
 
@@ -57,18 +57,6 @@ Hindsight moves beyond simple conversation recall by organizing knowledge into a
 
 ---
 
-## 🚀 1-Click Hackathon Demo Scenarios
-
-frAIday includes interactive benchmark scenarios with a **"Stateless vs. Hindsight"** comparison toggle:
-
-| Scenario | Objective | Without Hindsight (Stateless Baseline) | With Hindsight (Learning Mode Active) |
-| :--- | :--- | :--- | :--- |
-| **1. Database Port Trap (INC-104)** | Configure PostgreSQL service connection & test. | Defaults to `localhost:5432` with SSL enabled. Crashes with `ConnectionRefusedError`! | Recalls Mental Model #1 + INC-104 post-mortem in 18ms. Automatically uses port `5433` and `sslmode=disable`. Tests pass on 1st attempt! |
-| **2. Pydantic v2 Migration** | Write user authentication schema & validator. | Emits deprecated Pydantic v1 `class Config: orm_mode = True`, triggering warnings/errors. | Recalls Mental Model #2: writes modern `model_config = ConfigDict(from_attributes=True)` and `.model_dump()`. |
-| **3. DevOps CORS & Health Protocol** | Build lightweight HTTP server in `./workspace/`. | Omits CORS headers and OPTIONS handler, causing browser iframe preview to block requests. | Recalls Mental Model #3: automatically adds `Access-Control-Allow-Origin: *` and `/health` probe. |
-
----
-
 ## 🛠️ Architecture
 
 ```mermaid
@@ -98,7 +86,7 @@ flowchart TD
 
     subgraph UI HUD
         HS_Bank -.-> VisualHUD[Hindsight Visual Memory Inspector]
-        VisualHUD -.-> DemoToggle[1-Click Before vs After Toggle]
+        VisualHUD -.-> ModeToggle[Memory Mode Switcher]
     end
 ```
 

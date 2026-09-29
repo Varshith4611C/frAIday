@@ -164,18 +164,6 @@ class AppCoordinator {
           this.agentEngine.hindsightEnabled = enabled;
         }
         this.updateHindsightHudPill(enabled);
-      },
-      onRunScenario: (prompt, hindsightEnabled) => {
-        const inputEl = document.getElementById('chat-prompt-input');
-        if (inputEl) {
-          inputEl.value = prompt;
-          inputEl.focus();
-        }
-        this.switchTab('hindsight');
-        const runBtn = document.getElementById('btn-run-mission');
-        if (runBtn) {
-          runBtn.click();
-        }
       }
     });
 

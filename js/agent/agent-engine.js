@@ -275,7 +275,7 @@ PHASE 4: WALKTHROUGH DOCUMENTATION (Definition of Done - Strictly Created at Las
 </communication_style>`;
 
 export const STATELESS_BASELINE_SYSTEM_PROMPT = `<identity>
-You are frAIday running in STATELESS BASELINE DEMO MODE (Standard AI without Memory).
+You are frAIday running in STATELESS BASELINE MODE (Standard AI without Memory).
 You are pair programming with the user to solve their software development objectives from end-to-end.
 You have direct, autonomous access to the workspace shell terminal, filesystem, web research, and headless browser inspection.
 IMPORTANT: Vectorize Hindsight memory is explicitly SWITCHED OFF by the user for comparison benchmarking.
@@ -1701,7 +1701,7 @@ export class AgentEngine {
           const blockedResult = {
             success: false,
             disabled: true,
-            error: "HINDSIGHT MEMORY IS SWITCHED OFF: Stateless Baseline Demo Mode is active. Memory recall, retention, and reflection are strictly disabled. The agent must proceed without past memories or saved preferences.",
+            error: "HINDSIGHT MEMORY IS SWITCHED OFF: Stateless Baseline Mode is active. Memory recall, retention, and reflection are strictly disabled. The agent must proceed without past memories or saved preferences.",
             count: 0,
             results: []
           };
@@ -2120,7 +2120,7 @@ INSTRUCTIONS:
           const blockedResult = {
             success: false,
             disabled: true,
-            error: "HINDSIGHT MEMORY IS SWITCHED OFF: Stateless Baseline Demo Mode is active. Memory recall, retention, and reflection are strictly disabled.",
+            error: "HINDSIGHT MEMORY IS SWITCHED OFF: Stateless Baseline Mode is active. Memory recall, retention, and reflection are strictly disabled.",
             count: 0,
             results: []
           };

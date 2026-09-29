@@ -113,5 +113,5 @@ frAIday supports zero-friction deployment:
 | `/api/hindsight/recall` | `POST` | Executes TEMPR hybrid search for a query and generates system prompt context. |
 | `/api/hindsight/retain` | `POST` | Ingests new mental models, observations, world facts, or incident post-mortems. |
 | `/api/hindsight/reflect` | `POST` | Triggers cognitive synthesis reasoning over accumulated memories. |
-| `/api/hindsight/reset-scenarios` | `POST` | Re-seeds memory bank to benchmark hackathon scenarios for clean live demonstrations. |
+| `/api/hindsight/reset` | `POST` | Resets or clears memory bank for clean operation. |
 | `/api/hindsight/config` | `POST` | Updates runtime Hindsight credentials (`api_key`, `base_url`, `bank_id`). |

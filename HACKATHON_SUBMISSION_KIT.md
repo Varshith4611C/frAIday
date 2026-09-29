@@ -155,7 +155,55 @@ Instead of forgetting past bugs, frAIday:
 3️⃣ Reflects on project rules
 
 Watch the 1-click Before vs. After comparison demo 👇
-[Link to Video / GitHub] #AIAgents #Hindsight #BuildInPublic
+https://github.com/Varshith4611C/frAIday #AIAgents #Hindsight #BuildInPublic
+```
+
+### Reddit Post:
+**Recommended Subreddits:** `r/LocalLLaMA`, `r/artificial`, `r/MachineLearning`, `r/Python`, `r/OpenAI`
+
+**1-Click Submit Links:**
+- [Submit to Reddit (General)](https://www.reddit.com/submit?url=https%3A%2F%2Fgithub.com%2FVarshith4611C%2FfrAIday&title=frAIday%3A%20An%20Autonomous%20AI%20Software%20Engineer%20with%20Persistent%20Memory%20That%20Actually%20Learns%20(Open%20Source))
+- [Submit to r/LocalLLaMA](https://www.reddit.com/r/LocalLLaMA/submit?url=https%3A%2F%2Fgithub.com%2FVarshith4611C%2FfrAIday&title=frAIday%3A%20Autonomous%20Coding%20Agent%20Powered%20by%20Vectorize%20Hindsight%20Memory%20(LongMemEval%20%231))
+- [Submit to r/artificial](https://www.reddit.com/r/artificial/submit?url=https%3A%2F%2Fgithub.com%2FVarshith4611C%2FfrAIday&title=We%20built%20frAIday%3A%20Solving%20AI%20Agent%20Amnesia%20with%20a%204-Tier%20Cognitive%20Memory%20Hierarchy)
+
+**Reddit Post Title:**
+`frAIday: An Autonomous AI Software Engineer with Persistent Memory That Actually Learns Over Time (Open Source)`
+
+**Reddit Post Body:**
+```markdown
+Hey everyone!
+
+Every developer working with AI coding assistants knows the daily frustration:
+- You spend 20 minutes explaining that your Docker Postgres container is mapped to port 5433, not 5432.
+- You tell the model your codebase migrated to Pydantic v2 and forbids `class Config:`.
+- The AI fixes the bug... but tomorrow morning in a fresh session, **it makes the exact same mistake again.**
+
+Standard RAG doesn't solve this because flat cosine similarity over vector embeddings suffers from **epistemic confusion** (inability to distinguish past errors from current truth) and **temporal blindness**.
+
+For the Vectorize Hindsight Hackathon, we built **frAIday** — an autonomous AI software engineer that pairs an Antigravity-style autonomous execution loop with **Vectorize Hindsight** (ranked #1 on the LongMemEval benchmark).
+
+### 🧠 How It Works:
+Instead of dumping raw conversation history into the context window, frAIday uses a **4-Tier Cognitive Hierarchy**:
+1. **Mental Models**: High-level governing procedures (e.g. *"ALWAYS use port 5433 for Postgres with sslmode=disable"*).
+2. **Observations**: Deduplicated empirical facts backed by proof counts.
+3. **World Facts**: Objective repository & environment configurations.
+4. **Experience Facts**: Incident post-mortems and terminal bug resolutions.
+
+### ⚡ Key Capabilities:
+- **TEMPR Hybrid Recall (18ms)**: Parallel vector search, BM25 keyword matching, entity graph traversal, and temporal recency.
+- **Autonomous Self-Healing**: Terminal stderr and tracebacks are automatically piped into the ReAct loop. The agent inspects errors, patches code, verifies fixes with tests, and retains the lesson permanently into Hindsight.
+- **Isolated Multi-Workspaces**: Switch, create, and delete isolated project directories directly from the UI with zero session cross-talk.
+- **Full Autonomous IDE**: Real subprocess terminal, Monaco code editor, and live browser preview with console log forwarding.
+
+### 📊 Benchmark Comparison:
+In our 1-click test scenario ("Configure Postgres service connection and test"):
+- **Stateless Agent (Memory Off)**: Defaults to port 5432, crashes with `ConnectionRefusedError`.
+- **frAIday (Hindsight Active)**: Recalls past incident post-mortem in 18ms, configures port 5433, and passes tests on the 1st attempt with exit code 0.
+
+Everything is open source under MIT. We would love feedback from the community!
+
+👉 **GitHub Repo**: https://github.com/Varshith4611C/frAIday
+👉 **Architecture & Benchmark Deep-Dive**: https://github.com/Varshith4611C/frAIday/blob/main/ARTICLE.md
 ```
 
 ---

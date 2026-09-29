@@ -217,13 +217,18 @@ class EmbeddedHindsightEngine:
 
         # Determine target tier
         content_lower = content.lower() if isinstance(content, str) else json.dumps(content).lower()
-        if memory_type == "mental_model" or "always" in content_lower or "rule:" in content_lower or "never" in content_lower:
+        is_preference = any(kw in content_lower for kw in ("prefer", "preference", "like", "dislike", "theme", "color", "styling", "dont like", "only like"))
+        if memory_type == "mental_model" or is_preference or "always" in content_lower or "rule:" in content_lower or "never" in content_lower:
+            if is_preference:
+                for t in ("ui", "theme", "styling", "preference", "design", "all"):
+                    if t not in tags:
+                        tags.append(t)
             new_item = {
                 "id": f"mm-{item_id}",
-                "title": metadata.get("title", "Learned Behavioral Rule"),
+                "title": metadata.get("title", "User Aesthetic & Theme Directive" if is_preference else "Learned Behavioral Rule"),
                 "directive": str(content),
                 "applies_to": tags,
-                "confidence": float(metadata.get("confidence", 0.95)),
+                "confidence": float(metadata.get("confidence", 0.99 if is_preference else 0.95)),
                 "updated_at": now
             }
             bank["mental_models"].append(new_item)
@@ -315,6 +320,12 @@ class EmbeddedHindsightEngine:
         query_lower = query.lower()
         query_tokens = set(re.findall(r'[a-zA-Z0-9_\-\.]{2,}', query_lower))
 
+        # TEMPR Semantic Expansion: If query creates/builds an app or UI, expand to UI, design & preference concepts
+        ui_triggers = {"create", "build", "make", "app", "ui", "calculator", "dashboard", "page", "website", "site", "component", "frontend", "design", "tool", "game", "view", "portal", "screen", "timer", "todo", "terminal"}
+        is_ui_query = bool(query_tokens & ui_triggers)
+        if is_ui_query:
+            query_tokens.update({"ui", "design", "theme", "styling", "frontend", "color", "style", "css", "preference", "preferences"})
+
         ranked_results = []
 
         def score_text(text, tags=None, proof_count=1, recency_iso=None):
@@ -359,12 +370,15 @@ class EmbeddedHindsightEngine:
         if not types or "mental_models" in types or "mental_model" in types:
             for mm in bank.get("mental_models", []):
                 score = score_text(mm.get("title", "") + " " + mm.get("directive", ""), mm.get("applies_to"), proof_count=5)
-                # Boost mental models baseline
-                if score > 0.4 or any(tag.lower() in query_lower for tag in mm.get("applies_to", [])):
+                mm_applies = [t.lower() for t in mm.get("applies_to", [])]
+                is_pref_model = any(k in mm_applies for k in ("preference", "theme", "ui", "color", "styling", "all")) or "preference" in mm.get("title", "").lower() or "theme" in mm.get("title", "").lower()
+                
+                # Boost mental models baseline or if it's a UI/theme preference on a UI query
+                if score > 0.4 or any(tag.lower() in query_lower for tag in mm.get("applies_to", [])) or (is_ui_query and is_pref_model):
                     ranked_results.append({
                         "tier": "mental_model",
                         "id": mm["id"],
-                        "score": round(score + 5.0, 2),
+                        "score": round(score + 10.0 if (is_ui_query and is_pref_model) else score + 5.0, 2),
                         "title": mm.get("title"),
                         "text": mm.get("directive"),
                         "metadata": {"confidence": mm.get("confidence", 0.95), "applies_to": mm.get("applies_to")}
@@ -403,11 +417,13 @@ class EmbeddedHindsightEngine:
             for exp in bank.get("experience_facts", []):
                 combined = f"{exp.get('title', '')} {exp.get('root_cause', '')} {exp.get('resolution', '')}"
                 score = score_text(combined, exp.get("tags"), proof_count=2, recency_iso=exp.get("timestamp"))
-                if score > 0.5:
+                combined_lower = combined.lower()
+                is_pref_exp = any(k in combined_lower for k in ("theme", "blue", "color", "preference", "dont like", "only like"))
+                if score > 0.5 or (is_ui_query and is_pref_exp):
                     ranked_results.append({
                         "tier": "experience_fact",
                         "id": exp["id"],
-                        "score": round(score + 2.0, 2),
+                        "score": round(score + 6.0 if is_pref_exp else score + 2.0, 2),
                         "title": f"Incident Post-Mortem [{exp.get('incident_id')}]",
                         "text": f"Root Cause: {exp.get('root_cause')} | Resolution: {exp.get('resolution')}",
                         "metadata": {"incident_id": exp.get("incident_id"), "status": exp.get("status")}

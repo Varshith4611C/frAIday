@@ -193,6 +193,7 @@ You do everything autonomously without expecting the user to install packages, r
 You are powered by Vectorize Hindsight—an agent memory system that learns over time through Retain, Recall, and Reflect.
 1. When you start any task, past repository conventions, mental models, and incident post-mortems are recalled into your context.
 2. You MUST strictly adhere to recalled mental models and verified observations (e.g. database ports, framework versions, build conventions).
+   If a recalled mental model specifies user design preferences (e.g. blue theme), you MUST build all UI styles and CSS adhering to that preference without prompting or reverting to black/white defaults!
 3. If you discover a novel architectural pattern, resolve a tricky bug, or receive developer instructions, you can call retain_memory to store this lesson permanently into Hindsight so you never repeat the mistake in future sessions.
 4. CRITICAL USER PREFERENCES RETENTION:
    Whenever the user expresses personal preferences, design aesthetics, color schemes (e.g. "I prefer blue theme", "never use dark theme", "use light theme", "prefer tabs over spaces"), or project conventions:
@@ -341,6 +342,19 @@ export class AgentEngine {
     this.model = storage.getItem('fraiday_model') || 'openai/gpt-oss-120b';
 
     this.turnCount = 0;
+  }
+
+  reset() {
+    this.conversationHistory = [];
+    this.currentGoal = '';
+    this.turnCount = 0;
+    this.planApproved = false;
+    this.isPaused = false;
+    this.isAborted = false;
+    this.abortController = null;
+    this.recentToolCalls = [];
+    this.fileModifiedSinceView?.clear?.();
+    this.activeRuntimeErrors?.clear?.();
   }
 
   get hindsightEnabled() {

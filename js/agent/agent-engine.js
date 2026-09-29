@@ -195,10 +195,11 @@ You are powered by Vectorize Hindsight—an agent memory system that learns over
 2. You MUST strictly adhere to recalled mental models and verified observations (e.g. database ports, framework versions, build conventions).
    If a recalled mental model specifies user design preferences (e.g. blue theme), you MUST build all UI styles and CSS adhering to that preference without prompting or reverting to black/white defaults!
 3. If you discover a novel architectural pattern, resolve a tricky bug, or receive developer instructions, you can call retain_memory to store this lesson permanently into Hindsight so you never repeat the mistake in future sessions.
-4. CRITICAL USER PREFERENCES RETENTION:
-   Whenever the user expresses personal preferences, design aesthetics, color schemes (e.g. "I prefer blue theme", "never use dark theme", "use light theme", "prefer tabs over spaces"), or project conventions:
-   You MUST IMMEDIATELY call the retain_memory tool to permanently store this preference into Vectorize Hindsight!
-   Set memory_type: "mental_model" or "observation" with a clear directive and tags so it persists across all future sessions.
+4. CRITICAL USER PREFERENCES RETENTION & ACTIVE APPLICATION:
+   Whenever the user expresses personal preferences, design aesthetics, color schemes (e.g. "I prefer blue theme", "I only like blue theme", "never use dark theme", "use light theme", "prefer tabs over spaces"), or project conventions:
+   a. You MUST IMMEDIATELY call the retain_memory tool to permanently store this preference into Vectorize Hindsight!
+      Set memory_type: "mental_model" or "observation" with a clear directive and tags so it persists across all future sessions.
+   b. CRITICAL ACTIVE WORKSPACE APPLICATION: If an application or code already exists in the workspace (such as style.css, index.html, app.js), you MUST NOT stop after calling retain_memory! You MUST ALSO immediately use replace_file_content to update the active workspace code (e.g. restyling style.css to the requested blue theme/aesthetic) in the same turn or next turn, so the live preview immediately changes to match the user's preference! Never leave the existing workspace unchanged when the user expresses a design preference!
 5. EXPLICIT MEMORY RECALL:
    If the user says "use my previous preferences", "what are my preferences?", or references past tasks, you can call recall_memory to fetch all matching memories from Hindsight.
 </hindsight_memory_layer>
@@ -1307,7 +1308,7 @@ export class AgentEngine {
       } else {
         this.terminal?.appendOutput(`✕ Command exited with code ${result.exit_code}`, 'error');
       }
-    } else if (toolName === 'write_to_file' || toolName === 'replace_file_content') {
+    } else if (toolName === 'write_to_file' || toolName === 'replace_file_content' || toolName === 'multi_replace_file_content') {
       const modFile = (toolArgs.TargetFile || '').replace(/\\/g, '/');
       if (modFile) {
         this.fileModifiedSinceView.add(modFile);
@@ -1592,6 +1593,21 @@ export class AgentEngine {
           this.conversationHistory.push({
             role: 'user',
             content: `Please take action to address the user's request: "${this.currentGoal}". Use view_file to inspect the code, identify the issue, and apply a targeted fix using replace_file_content.`
+          });
+          continue;
+        }
+
+        // CRITICAL CHECK: If memory tools were called or user requested design/theme/styling modifications,
+        // and workspace code already exists, the agent MUST update the workspace code before declaring completion!
+        const codeModifyingTools = ['write_to_file', 'replace_file_content', 'multi_replace_file_content'];
+        const codeModifiedSinceUserPrompt = actionsSinceUserPrompt.some(m => codeModifyingTools.includes(m.name));
+        const onlyMemoryToolsCalled = actionsSinceUserPrompt.length > 0 && actionsSinceUserPrompt.every(m => ['retain_memory', 'recall_memory', 'reflect_memory'].includes(m.name));
+        const isStyleOrChangeRequest = /(theme|color|blue|dark|light|style|design|ui|css|font|palette|red|green|button|layout|change|update|make|fix|add|remove|modify|restyle|switch)/i.test(this.currentGoal || '');
+
+        if (hasCode && !codeModifiedSinceUserPrompt && (onlyMemoryToolsCalled || isStyleOrChangeRequest)) {
+          this.conversationHistory.push({
+            role: 'user',
+            content: `You have called Hindsight memory tools, but the active workspace files have NOT been updated yet! The user requested: "${this.currentGoal}". Please use view_file to inspect the current code, and use replace_file_content to update style.css (and index.html if needed) so that the running application immediately reflects the user's requested preference in the live preview.`
           });
           continue;
         }

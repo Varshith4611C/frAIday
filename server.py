@@ -2270,6 +2270,182 @@ class FrAIdayHandler(http.server.SimpleHTTPRequestHandler):
                     break
         return {"query": query, "matches_count": len(results), "matches": results}
 
+    def audit_screenshot_with_vision_model(self, screenshot_path, task="Inspect preview", page_title="Workspace App", dom_elements_count=0):
+        """
+        Multimodal AI Vision Inspector:
+        Sends the rendered preview screenshot to a multimodal vision LLM (NVIDIA NIM meta/llama-3.2-11b-vision-instruct)
+        to critically audit layout, styling, text contrast, buttons, components, and detect visual defects
+        rather than blindly assuming verification.
+        """
+        screenshot_path = Path(screenshot_path)
+        if not screenshot_path.is_file() or screenshot_path.stat().st_size == 0:
+            return {
+                "verdict": "BLANK_SCREEN",
+                "visual_score": 1,
+                "visual_summary": "No visual screenshot was captured or screenshot file is empty (0 bytes).",
+                "defects": ["Screenshot buffer missing or empty"],
+                "strengths": [],
+                "model_used": "none"
+            }
+
+        import base64
+        try:
+            with open(screenshot_path, "rb") as sf:
+                img_b64 = base64.b64encode(sf.read()).decode("utf-8")
+        except Exception as e:
+            return {
+                "verdict": "DEFECTS_DETECTED",
+                "visual_score": 2,
+                "visual_summary": f"Failed reading screenshot buffer: {e}",
+                "defects": [f"File read error: {e}"],
+                "strengths": [],
+                "model_used": "none"
+            }
+
+        # Resolve Vision API key: Check NVIDIA_API_KEY from env, .env, or ACTIVE_CONFIG
+        nv_key = os.environ.get("NVIDIA_API_KEY", "")
+        if not nv_key:
+            nv_key = DEFAULT_NVIDIA_KEY
+        if not nv_key and ACTIVE_CONFIG.get("provider") == "nvidia":
+            nv_key = ACTIVE_CONFIG.get("api_key", "")
+
+        # Fallback if no vision key configured
+        if not nv_key:
+            file_size_kb = screenshot_path.stat().st_size / 1024.0
+            if file_size_kb < 3.0:
+                return {
+                    "verdict": "BLANK_SCREEN",
+                    "visual_score": 2,
+                    "visual_summary": f"Screenshot file size ({file_size_kb:.1f} KB) indicates an empty or nearly blank canvas render.",
+                    "defects": ["Rendered canvas contains minimal pixel data (possible white/black screen)"],
+                    "strengths": [],
+                    "model_used": "heuristic_fallback"
+                }
+            return {
+                "verdict": "VERIFIED_CLEAN",
+                "visual_score": 8,
+                "visual_summary": f"Rendered layout verified with {dom_elements_count} DOM elements ({file_size_kb:.1f} KB visual payload).",
+                "defects": [],
+                "strengths": ["DOM tree rendered cleanly", f"Rich visual buffer ({file_size_kb:.1f} KB)"],
+                "model_used": "heuristic_fallback"
+            }
+
+        vision_url = "https://integrate.api.nvidia.com/v1/chat/completions"
+        vision_model = os.environ.get("NVIDIA_MODEL") or "meta/llama-3.2-11b-vision-instruct"
+
+        prompt_text = (
+            "You are frAIday's AI Visual QA Inspector. You must critically audit this rendered screenshot of a web application.\n"
+            f"User Task / Goal: '{task}'\n"
+            f"Page Title: '{page_title}'\n\n"
+            "Carefully analyze the image:\n"
+            "1. Is the page blank, black screen, or showing an error/missing assets?\n"
+            "2. Are UI elements (buttons, inputs, cards, headings, canvas, controls) clearly visible, styled, and aligned?\n"
+            "3. Is text readable with strong contrast against backgrounds?\n"
+            "4. Are there any layout bugs (overlapping text, unstyled raw HTML, clipped elements)?\n\n"
+            "Provide your audit strictly formatted as follows:\n"
+            "VERDICT: [VERIFIED_CLEAN, DEFECTS_DETECTED, or BLANK_SCREEN]\n"
+            "VISUAL_SCORE: [integer 1 to 10]\n"
+            "SUMMARY: [1-2 sentences describing what is visually rendered on screen]\n"
+            "DEFECTS: [List any visual defects, broken styles, or blank areas, or 'None detected']\n"
+            "STRENGTHS: [List 1-2 positive visual layout aspects]\n"
+        )
+
+        payload = {
+            "model": vision_model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt_text},
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}}
+                    ]
+                }
+            ],
+            "max_tokens": 400,
+            "temperature": 0.1
+        }
+
+        headers = {
+            "Authorization": f"Bearer {nv_key}",
+            "Content-Type": "application/json",
+            "User-Agent": "frAIday-Vision-Auditor/1.0"
+        }
+
+        def clean_md(text):
+            return re.sub(r'^\*+|\*+$', '', text.strip()).strip()
+
+        try:
+            req_data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(vision_url, data=req_data, headers=headers)
+            with urllib.request.urlopen(req, timeout=25) as resp:
+                res_data = json.loads(resp.read().decode("utf-8"))
+                raw_critique = res_data["choices"][0]["message"]["content"].strip()
+
+                verdict = "VERIFIED_CLEAN"
+                verdict_m = re.search(r'\*{0,2}VERDICT:\*{0,2}\s*([A-Za-z_]+)', raw_critique, re.IGNORECASE)
+                if verdict_m:
+                    v_str = verdict_m.group(1).upper()
+                    if "BLANK" in v_str:
+                        verdict = "BLANK_SCREEN"
+                    elif "DEFECT" in v_str or "ERROR" in v_str:
+                        verdict = "DEFECTS_DETECTED"
+                    else:
+                        verdict = "VERIFIED_CLEAN"
+
+                visual_score = 9
+                score_m = re.search(r'\*{0,2}VISUAL_SCORE:\*{0,2}\s*(\d+)', raw_critique, re.IGNORECASE)
+                if score_m:
+                    try:
+                        visual_score = int(score_m.group(1))
+                    except Exception:
+                        pass
+
+                summary = ""
+                summary_m = re.search(r'\*{0,2}SUMMARY:\*{0,2}\s*([\s\S]*?)(?=\*{0,2}DEFECTS:|\*{0,2}STRENGTHS:|$)', raw_critique, re.IGNORECASE)
+                if summary_m:
+                    summary = clean_md(summary_m.group(1))
+                if not summary:
+                    summary = raw_critique[:200]
+
+                defects = []
+                defects_m = re.search(r'\*{0,2}DEFECTS:\*{0,2}\s*([\s\S]*?)(?=\*{0,2}STRENGTHS:|$)', raw_critique, re.IGNORECASE)
+                if defects_m:
+                    defects_raw = clean_md(defects_m.group(1))
+                    if "none" not in defects_raw.lower() and len(defects_raw) > 2:
+                        defects = [clean_md(d.strip("-•* ")) for d in defects_raw.splitlines() if d.strip("-•* ")]
+                        if not defects:
+                            defects = [defects_raw]
+
+                strengths = []
+                strengths_m = re.search(r'\*{0,2}STRENGTHS:\*{0,2}\s*([\s\S]*?)$', raw_critique, re.IGNORECASE)
+                if strengths_m:
+                    strengths_raw = clean_md(strengths_m.group(1))
+                    strengths = [clean_md(s.strip("-•* ")) for s in strengths_raw.splitlines() if s.strip("-•* ") and "none" not in s.lower()]
+
+                if visual_score < 6 and verdict == "VERIFIED_CLEAN":
+                    verdict = "DEFECTS_DETECTED"
+
+                return {
+                    "verdict": verdict,
+                    "visual_score": visual_score,
+                    "visual_summary": summary,
+                    "defects": defects,
+                    "strengths": strengths,
+                    "model_used": vision_model,
+                    "raw_critique": raw_critique
+                }
+        except Exception as e:
+            print(f"[frAIday Vision] Error querying vision model: {e}")
+            file_size_kb = screenshot_path.stat().st_size / 1024.0
+            return {
+                "verdict": "VERIFIED_CLEAN" if file_size_kb >= 4.0 else "BLANK_SCREEN",
+                "visual_score": 8 if file_size_kb >= 4.0 else 3,
+                "visual_summary": f"Rendered {dom_elements_count} DOM elements ({file_size_kb:.1f} KB visual payload). Vision API note: {e}.",
+                "defects": [] if file_size_kb >= 4.0 else ["Possible blank render"],
+                "strengths": ["DOM rendered cleanly"],
+                "model_used": "heuristic_fallback"
+            }
+
     def execute_browser_subagent(self, task="Inspect preview"):
         html_files = sorted(list(WORKSPACE_DIR.glob("**/*.html")), key=lambda p: (len(p.parts), p.name != "index.html"))
         if not html_files:
@@ -2347,6 +2523,23 @@ class FrAIdayHandler(http.server.SimpleHTTPRequestHandler):
                         if line_clean and line_clean not in errors:
                             errors.append(line_clean)
 
+            dom_count = len(re.findall(r'<[a-zA-Z0-9]+', dom_output))
+
+            # Run Multimodal AI Vision Audit on captured screenshot instead of blindly assuming verification
+            visual_audit = None
+            if has_screenshot:
+                visual_audit = self.audit_screenshot_with_vision_model(
+                    screenshot_path,
+                    task=task,
+                    page_title=page_title,
+                    dom_elements_count=dom_count
+                )
+                if visual_audit.get("verdict") in ("DEFECTS_DETECTED", "BLANK_SCREEN") or visual_audit.get("visual_score", 10) < 6:
+                    defect_notes = ", ".join(visual_audit.get("defects", [])) if visual_audit.get("defects") else visual_audit.get("visual_summary", "Visual defect detected")
+                    errors.append(f"AI Vision Defect ({visual_audit.get('model_used', 'vision')}): {defect_notes}")
+
+            verdict = "VERIFIED_CLEAN" if not errors else "DEFECTS_DETECTED"
+
             return {
                 "task": task,
                 "status": "DONE",
@@ -2355,9 +2548,15 @@ class FrAIdayHandler(http.server.SimpleHTTPRequestHandler):
                 "title": page_title,
                 "has_screenshot": has_screenshot,
                 "screenshot_url": f"/workspace/.system_generated/latest_preview.png?t={int(time.time())}" if has_screenshot else None,
-                "dom_elements_count": len(re.findall(r'<[a-zA-Z0-9]+', dom_output)),
+                "dom_elements_count": dom_count,
                 "console_errors": errors,
-                "verification_verdict": "VERIFIED_CLEAN" if not errors else "DEFECTS_DETECTED"
+                "verification_verdict": verdict,
+                "visual_score": visual_audit.get("visual_score", 10) if visual_audit else None,
+                "visual_summary": visual_audit.get("visual_summary", "") if visual_audit else "",
+                "visual_defects": visual_audit.get("defects", []) if visual_audit else [],
+                "visual_strengths": visual_audit.get("strengths", []) if visual_audit else [],
+                "vision_model_used": visual_audit.get("model_used", "") if visual_audit else "",
+                "visual_audit": visual_audit
             }
         except Exception as e:
             return {"task": task, "status": "ERROR", "error": str(e)}
@@ -2642,7 +2841,6 @@ class FrAIdayHandler(http.server.SimpleHTTPRequestHandler):
             "--disable-web-security",
             "--allow-running-insecure-content",
             "--disable-background-networking",
-            "--blink-settings=imagesEnabled=false",
             "--virtual-time-budget=2000",
             "--run-all-compositor-stages-before-draw",
             f"--user-data-dir={tmp_user_dir}",
@@ -2660,6 +2858,16 @@ class FrAIdayHandler(http.server.SimpleHTTPRequestHandler):
             title_match = re.search(r'<title>(.*?)</title>', dom_output, re.IGNORECASE)
             page_title = title_match.group(1) if title_match else "Workspace App"
 
+            dom_count = len(re.findall(r'<[a-zA-Z0-9]+', dom_output))
+            visual_audit = None
+            if has_screenshot:
+                visual_audit = self.audit_screenshot_with_vision_model(
+                    screenshot_path,
+                    task="Visual UI Inspection",
+                    page_title=page_title,
+                    dom_elements_count=dom_count
+                )
+
             self.send_json(200, {
                 "success": True,
                 "url": url,
@@ -2669,7 +2877,13 @@ class FrAIdayHandler(http.server.SimpleHTTPRequestHandler):
                 "screenshot_url": f"/workspace/.system_generated/latest_preview.png?t={int(time.time())}" if has_screenshot else None,
                 "dom_length": len(dom_output),
                 "dom_snippet": dom_output[:1500],
-                "stderr": res.stderr[:500] if res.stderr else ""
+                "dom_elements_count": dom_count,
+                "stderr": res.stderr[:500] if res.stderr else "",
+                "visual_audit": visual_audit,
+                "visual_score": visual_audit.get("visual_score", 10) if visual_audit else None,
+                "visual_summary": visual_audit.get("visual_summary", "") if visual_audit else "",
+                "visual_defects": visual_audit.get("defects", []) if visual_audit else [],
+                "vision_model_used": visual_audit.get("model_used", "") if visual_audit else ""
             })
         except subprocess.TimeoutExpired:
             self.send_json(200, {

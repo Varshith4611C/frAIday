@@ -123,7 +123,7 @@ export const ANTIGRAVITY_TOOLS = [
     type: "function",
     function: {
       name: "browser_subagent",
-      description: "Launch a headless browser subagent to render the workspace application entrypoint (index.html), capture screenshot, DOM tree, and inspect console errors for visual verification.",
+      description: "Launch an autonomous browser subagent that renders the workspace web application (index.html), captures a real screenshot, and submits it to a multimodal AI vision model for visual verification (auditing UI layout, styling fidelity, readability, and defect detection).",
       parameters: {
         type: "object",
         properties: {
@@ -244,19 +244,19 @@ PHASE 2: EXECUTION & AUTONOMOUS CODE SYNTHESIS:
   NEVER attempt to execute client-side browser files with Node.js in the terminal (e.g. DO NOT run node app.js). Node.js has no DOM window or document globals.
   ONLY use run_command for backend Python/Node servers, package managers (pip install, npm install), or CLI test runners.
 
-PHASE 3: TESTING & HEADLESS BROWSER VISUAL AUDIT:
-- Call browser_subagent to launch headless Chrome, render the live preview at http://localhost:8080/workspace/index.html, take a screenshot, and verify that the page renders cleanly with 0 console errors.
-- If errors or exceptions occur, diagnose them immediately with view_file or search_web, patch with replace_file_content, and re-audit with browser_subagent.
+PHASE 3: TESTING & MULTIMODAL AI VISION AUDIT:
+- Call browser_subagent to launch headless Chrome, render the live preview at http://localhost:8080/workspace/index.html, take a screenshot, and verify with the multimodal AI vision model that the page renders cleanly with high visual quality score and 0 console errors.
+- If errors, exceptions, or visual defects (blank screen, unstyled layout, misaligned elements) are detected by the vision model, diagnose them immediately with view_file or search_web, patch with replace_file_content, and re-audit with browser_subagent.
 
 PHASE 4: WALKTHROUGH DOCUMENTATION (Definition of Done - Strictly Created at Last):
-- walkthrough.md is the final completion certificate. It MUST ONLY be created at Phase 4, AFTER Phase 2 code is created AND Phase 3 browser_subagent visual verification has certified 0 errors!
+- walkthrough.md is the final completion certificate. It MUST ONLY be created at Phase 4, AFTER Phase 2 code is created AND Phase 3 browser_subagent visual verification has certified 0 errors and a clean visual score!
 - NEVER create walkthrough.md during Phase 1, Phase 2, or during error diagnostics!
 - walkthrough.md must document:
   # Walkthrough - [Goal Title]
   ## Changes Made
   - List of files created/modified
   ## Verification Results
-  - Headless Chrome visual audit findings, DOM element count, and clean error check
+  - Multimodal AI Vision verification score (e.g. 10/10), visual layout critique, DOM element count, and clean error check
   ## Live Preview
   - Instructions to view http://localhost:8080/workspace/index.html
 </planning_mode>
@@ -866,13 +866,31 @@ export class AgentEngine {
             `).join('')}
           `;
         } else if (toolName === 'browser_subagent') {
+          const isClean = toolResult?.verification_verdict === 'VERIFIED_CLEAN' && (!toolResult?.console_errors || toolResult.console_errors.length === 0);
+          const score = toolResult?.visual_score !== undefined ? toolResult.visual_score : (isClean ? 10 : 4);
+          const modelTag = toolResult?.vision_model_used || 'meta/llama-3.2-11b-vision-instruct';
           resHtml = `
-            <div style="color:#10b981;font-weight:600;display:flex;align-items:center;gap:4px;">
-              <span>✔</span> <span>Headless Chrome certified: <strong>${escapeHtml(toolResult?.title || 'OK')}</strong> (${toolResult?.dom_elements_count || 0} DOM elements)</span>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;gap:6px;">
+              <div style="color:${isClean ? '#10b981' : '#f43f5e'};font-weight:600;display:flex;align-items:center;gap:6px;">
+                <span>${isClean ? '👁️' : '⚠️'}</span>
+                <span>AI Vision: <strong>${escapeHtml(toolResult?.verification_verdict || (isClean ? 'VERIFIED_CLEAN' : 'DEFECTS_DETECTED'))}</strong></span>
+              </div>
+              <span style="font-size:10.5px;padding:1px 7px;border-radius:12px;background:${isClean ? 'rgba(16,185,129,0.15)' : 'rgba(244,63,94,0.15)'};color:${isClean ? '#34d399' : '#f43f5e'};border:1px solid ${isClean ? 'rgba(16,185,129,0.3)' : 'rgba(244,63,94,0.3)'};">
+                Quality Score: <strong>${score}/10</strong>
+              </span>
             </div>
-            ${toolResult?.console_errors && toolResult.console_errors.length ? `
-              <div style="color:#f43f5e;font-size:10.5px;margin-top:2px;">Errors: ${escapeHtml(toolResult.console_errors.join(', '))}</div>
+            ${toolResult?.visual_summary ? `
+              <div style="font-size:11px;color:#94a3b8;line-height:1.4;margin-bottom:4px;background:rgba(255,255,255,0.03);padding:4px 8px;border-radius:4px;border-left:2px solid ${isClean ? '#10b981' : '#f43f5e'};">
+                <span style="color:#cbd5e1;font-weight:500;">Visual Critique (${escapeHtml(modelTag)}):</span> ${escapeHtml(toolResult.visual_summary)}
+              </div>
             ` : ''}
+            ${toolResult?.console_errors && toolResult.console_errors.length ? `
+              <div style="color:#f43f5e;font-size:10.5px;margin-top:2px;"><strong>Issues:</strong> ${escapeHtml(toolResult.console_errors.join('; '))}</div>
+            ` : ''}
+            <div style="font-size:10px;color:#64748b;display:flex;gap:8px;">
+              <span>DOM Elements: ${toolResult?.dom_elements_count || 0}</span>
+              <span>Entrypoint: ${escapeHtml(toolResult?.entrypoint || 'index.html')}</span>
+            </div>
           `;
         } else {
           resHtml = `<div style="color:#10b981;">✔ ${escapeHtml(extraText || 'Execution completed.')}</div>`;
@@ -894,8 +912,11 @@ export class AgentEngine {
         previewDiv.style.background = '#000';
         previewDiv.innerHTML = `
           <div style="padding:4px 8px;background:rgba(56,189,248,0.12);font-size:10.5px;color:#38bdf8;display:flex;justify-content:space-between;align-items:center;">
-            <span>📸 Headless Chrome Render Snapshot</span>
-            <a href="${toolResult.screenshot_url}" target="_blank" style="color:#38bdf8;text-decoration:underline;">Full View ↗</a>
+            <span>📸 AI-Audited Screenshot (${escapeHtml(toolResult.vision_model_used || 'Multimodal Vision')})</span>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span style="font-size:10px;color:${(toolResult.visual_score || 10) >= 7 ? '#34d399' : '#f43f5e'};font-weight:600;">Score: ${toolResult.visual_score || 10}/10</span>
+              <a href="${toolResult.screenshot_url}" target="_blank" style="color:#38bdf8;text-decoration:underline;">Full View ↗</a>
+            </div>
           </div>
           <img src="${toolResult.screenshot_url}" style="width:100%;max-height:160px;object-fit:contain;display:block;background:#050811;" alt="Verified Live Render" />
         `;
@@ -945,7 +966,9 @@ export class AgentEngine {
     } else if (toolName === 'search_web') {
       return `Found ${(result.results || []).length} search results for "${result.query || ''}"`;
     } else if (toolName === 'browser_subagent') {
-      return `Browser audit: ${result.title || 'OK'} (${result.dom_elements_count || 0} elements, errors: ${result.console_errors?.length || 0})`;
+      const vScore = result.visual_score !== undefined ? ` [AI Vision: ${result.visual_score}/10 ${result.verification_verdict || 'VERIFIED'}]` : '';
+      const vCritique = result.visual_summary ? `\nCritique: ${result.visual_summary.slice(0, 120)}` : '';
+      return `Browser visual audit: ${result.title || 'OK'} (${result.dom_elements_count || 0} DOM elements, errors: ${result.console_errors?.length || 0})${vScore}${vCritique}`;
     } else if (toolName === 'list_dir') {
       return `Found ${result.entries?.length || 0} items`;
     } else if (toolName === 'grep_search') {
@@ -1683,15 +1706,34 @@ export class AgentEngine {
           const hasBrowserAudit = this.conversationHistory.some(m => m.name === 'browser_subagent' || (m.role === 'tool' && (m.content || '').includes('browser_subagent')));
           const hasActiveErrors = this.activeRuntimeErrors && this.activeRuntimeErrors.size > 0;
 
-          if (!hasCode || !hasBrowserAudit || hasActiveErrors) {
+          // Check if latest browser audit had visual defects or failed AI Vision verification
+          let hasVisualDefects = false;
+          let visualDefectMsg = "";
+          for (let i = this.conversationHistory.length - 1; i >= 0; i--) {
+            const m = this.conversationHistory[i];
+            if (m.name === 'browser_subagent' || (m.role === 'tool' && typeof m.content === 'string' && m.content.includes('verification_verdict'))) {
+              try {
+                const parsed = JSON.parse(m.content);
+                if (parsed.verification_verdict === 'DEFECTS_DETECTED' || parsed.verification_verdict === 'BLANK_SCREEN' || (parsed.visual_score !== undefined && parsed.visual_score < 6)) {
+                  hasVisualDefects = true;
+                  visualDefectMsg = parsed.visual_summary || (parsed.visual_defects ? parsed.visual_defects.join(', ') : 'Visual rendering defect or low quality score detected by AI Vision model');
+                }
+              } catch (_) {}
+              break;
+            }
+          }
+
+          if (!hasCode || !hasBrowserAudit || hasActiveErrors || hasVisualDefects) {
             let reason = "";
             if (!hasCode) {
               reason = "Application code files (index.html, style.css, app.js) have not been created yet.";
             } else if (!hasBrowserAudit) {
-              reason = "Headless Chrome verification (browser_subagent) has not been performed yet. You must audit the live render before generating walkthrough.md.";
+              reason = "Headless browser multimodal verification (browser_subagent) has not been performed yet. You must audit the live render before generating walkthrough.md.";
             } else if (hasActiveErrors) {
               const errList = Array.from(this.activeRuntimeErrors.keys()).join('; ');
               reason = `The application has active runtime errors that MUST be fixed: [${errList}]. Use view_file to inspect, replace_file_content to patch code, and browser_subagent to verify clean execution with 0 errors before generating walkthrough.md.`;
+            } else if (hasVisualDefects) {
+              reason = `Multimodal AI Vision model detected visual defects: [${visualDefectMsg}]. You must fix layout/styling issues and verify with browser_subagent before generating walkthrough.md.`;
             }
             const blockedResult = {
               error: `LIFECYCLE ENFORCEMENT BLOCKED walkthrough.md: ${reason}`
@@ -2082,7 +2124,7 @@ INSTRUCTIONS:
             this.formatToolResultSummary(toolName, toolResult), 
             toolResult
           );
-          if (toolName === 'browser_subagent' && (!toolResult.console_errors || toolResult.console_errors.length === 0)) {
+          if (toolName === 'browser_subagent' && (!toolResult.console_errors || toolResult.console_errors.length === 0) && toolResult.verification_verdict !== 'DEFECTS_DETECTED' && toolResult.verification_verdict !== 'BLANK_SCREEN' && (toolResult.visual_score === undefined || toolResult.visual_score >= 6)) {
             hasVerified = true;
           }
         } catch (err) {

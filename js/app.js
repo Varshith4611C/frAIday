@@ -2292,25 +2292,65 @@ class AppCoordinator {
     row.style.marginBottom = '12px';
 
     const timeStr = customTime || (new Date()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const isClean = result.verification_verdict === 'VERIFIED_CLEAN' && (!result.console_errors || result.console_errors.length === 0);
+    const score = result.visual_score !== undefined ? result.visual_score : (isClean ? 10 : 4);
+    const model = result.vision_model_used || 'meta/llama-3.2-11b-vision-instruct';
+    const hasDefects = (result.visual_defects && result.visual_defects.length > 0) || !isClean;
+
+    const escape = (str) => {
+      if (!str) return '';
+      return String(str).replace(/[&<>"']/g, s => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[s]);
+    };
 
     row.innerHTML = `
       <div class="chat-sender-row">
-        <span class="chat-sender-avatar">📸</span>
-        <span class="chat-sender-name">Visual Verification Subagent</span>
-        <span class="chat-sender-badge" style="background:rgba(16,185,129,0.2);color:#34d399;border:1px solid rgba(16,185,129,0.4);">Verified Live Render</span>
+        <span class="chat-sender-avatar">👁️</span>
+        <span class="chat-sender-name">Multimodal Visual QA Inspector</span>
+        <span class="chat-sender-badge" style="background:${isClean ? 'rgba(16,185,129,0.18)' : 'rgba(244,63,94,0.18)'};color:${isClean ? '#34d399' : '#f43f5e'};border:1px solid ${isClean ? 'rgba(16,185,129,0.35)' : 'rgba(244,63,94,0.35)'};">
+          AI Vision Score: ${score}/10 ${isClean ? '· Verified Clean' : '· Defects Detected'}
+        </span>
         <span class="chat-time">${timeStr}</span>
       </div>
-      <div class="chat-bubble-agent" style="border-color:rgba(16,185,129,0.4);background:rgba(6,25,18,0.95);color:#e2e8f0;">
-        <div style="font-weight:700;color:#34d399;margin-bottom:4px;display:flex;align-items:center;gap:6px;">
-          <span>✔ Autonomous Script Execution Certified</span>
-          <span style="font-size:11px;font-weight:normal;color:#94a3b8;">(${result.dom_elements_count || 0} DOM Elements · 0 Errors)</span>
+      <div class="chat-bubble-agent" style="border-color:${isClean ? 'rgba(16,185,129,0.4)' : 'rgba(244,63,94,0.4)'};background:${isClean ? 'rgba(6,25,18,0.95)' : 'rgba(30,10,14,0.95)'};color:#e2e8f0;">
+        <div style="font-weight:700;color:${isClean ? '#34d399' : '#f43f5e'};margin-bottom:4px;display:flex;align-items:center;justify-content:space-between;gap:6px;">
+          <span>${isClean ? '✔ Multimodal AI Vision Certified' : '⚠️ Visual Deficiencies Flagged'}</span>
+          <span style="font-size:11px;font-weight:normal;color:#94a3b8;">(${result.dom_elements_count || 0} DOM Elements · ${result.console_errors?.length || 0} Console Errors)</span>
         </div>
-        <div style="font-size:12px;color:#cbd5e1;margin-bottom:8px;">
-          Headless Chrome executed the workspace JavaScript client code, confirmed clean rendering without unhandled exceptions, and captured the live visual proof below:
+        
+        <div style="margin-bottom:8px;padding:8px 10px;border-radius:6px;background:rgba(255,255,255,0.03);border:1px solid ${isClean ? 'rgba(16,185,129,0.2)' : 'rgba(244,63,94,0.25)'};font-size:11.5px;line-height:1.45;">
+          <div style="font-weight:600;color:${isClean ? '#38bdf8' : '#fb7185'};margin-bottom:3px;display:flex;align-items:center;gap:6px;">
+            <span>🔍 Model Analysis (${escape(model)}):</span>
+          </div>
+          <div style="color:#cbd5e1;">${escape(result.visual_summary || 'Visual elements, typography, and viewport layout verified.')}</div>
         </div>
-        <div style="border-radius:6px;overflow:hidden;border:1px solid rgba(16,185,129,0.3);background:#000;position:relative;">
+
+        ${hasDefects && result.visual_defects && result.visual_defects.length ? `
+          <div style="margin-bottom:8px;padding:6px 10px;border-radius:6px;background:rgba(244,63,94,0.12);border:1px solid rgba(244,63,94,0.3);font-size:11px;color:#fecdd3;">
+            <div style="font-weight:600;color:#f43f5e;margin-bottom:2px;">⚠️ Detected Visual Defects:</div>
+            <div>${escape(Array.isArray(result.visual_defects) ? result.visual_defects.join('; ') : result.visual_defects)}</div>
+          </div>
+        ` : ''}
+
+        ${result.console_errors && result.console_errors.length ? `
+          <div style="margin-bottom:8px;padding:6px 10px;border-radius:6px;background:rgba(244,63,94,0.12);border:1px solid rgba(244,63,94,0.3);font-size:11px;color:#fecdd3;">
+            <div style="font-weight:600;color:#f43f5e;margin-bottom:2px;">⚠️ Console Runtime Errors:</div>
+            <div>${escape(result.console_errors.join('; '))}</div>
+          </div>
+        ` : ''}
+
+        ${result.visual_strengths && result.visual_strengths.length ? `
+          <div style="margin-bottom:8px;font-size:11px;color:#34d399;display:flex;gap:6px;align-items:flex-start;">
+            <span>✨</span>
+            <div><strong>Strengths:</strong> ${escape(Array.isArray(result.visual_strengths) ? result.visual_strengths.join('; ') : result.visual_strengths)}</div>
+          </div>
+        ` : ''}
+
+        <div style="border-radius:6px;overflow:hidden;border:1px solid ${isClean ? 'rgba(16,185,129,0.3)' : 'rgba(244,63,94,0.3)'};background:#000;position:relative;">
           <img src="${result.screenshot_url}" style="width:100%;max-height:220px;object-fit:cover;display:block;cursor:pointer;background:#050811;" alt="Verified Live Render" onclick="window.open('${result.screenshot_url}', '_blank')" title="Click to view full image in new tab" />
-          <div style="position:absolute;bottom:6px;right:6px;background:rgba(0,0,0,0.8);padding:3px 8px;border-radius:4px;font-size:10.5px;color:#34d399;border:1px solid rgba(52,211,153,0.3);cursor:pointer;" onclick="window.open('${result.screenshot_url}', '_blank')">
+          <div style="position:absolute;top:6px;left:6px;background:rgba(0,0,0,0.85);padding:2px 8px;border-radius:4px;font-size:10px;color:${isClean ? '#34d399' : '#f43f5e'};border:1px solid ${isClean ? 'rgba(52,211,153,0.3)' : 'rgba(244,63,94,0.3)'};font-weight:600;">
+            Score: ${score}/10 · ${isClean ? 'Verified Clean' : 'Defects Flagged'}
+          </div>
+          <div style="position:absolute;bottom:6px;right:6px;background:rgba(0,0,0,0.85);padding:3px 8px;border-radius:4px;font-size:10.5px;color:#38bdf8;border:1px solid rgba(56,189,248,0.3);cursor:pointer;" onclick="window.open('${result.screenshot_url}', '_blank')">
             Open Screenshot ↗
           </div>
         </div>

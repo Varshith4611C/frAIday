@@ -221,7 +221,7 @@ class AppCoordinator {
       pill.style.borderColor = 'rgba(56, 189, 248, 0.35)';
       label.style.color = '#38bdf8';
       const stats = this.hindsightInspector?.bankStatus?.stats;
-      const count = stats?.total ?? 10;
+      const count = stats?.total !== undefined ? stats.total : 0;
       label.innerText = lastCount !== null ? `Hindsight: Recalled ${lastCount} (Bank: ${count})` : `Hindsight: Active (${count} Mems)`;
     }
   }
@@ -230,7 +230,7 @@ class AppCoordinator {
     const el = document.getElementById('sidebar-hindsight-quickview');
     if (!el) return;
     const stats = this.hindsightInspector?.bankStatus?.stats || {
-      mental_models: 3, observations: 3, experience_facts: 2, world_facts: 2, total: 10
+      mental_models: 0, observations: 0, experience_facts: 0, world_facts: 0, total: 0
     };
     el.innerHTML = `
       <div style="display:flex;flex-direction:column;gap:10px;font-size:12px;">
@@ -256,7 +256,11 @@ class AppCoordinator {
   switchTab(tabKey) {
     this.activeTab = tabKey;
     document.querySelectorAll('.canvas-tab').forEach(tab => {
-      tab.classList.toggle('active', tab.getAttribute('data-tab') === tabKey);
+      const isActive = tab.getAttribute('data-tab') === tabKey;
+      tab.classList.toggle('active', isActive);
+      if (isActive) {
+        tab.scrollIntoView({ behavior: 'smooth', inline: 'nearest', block: 'nearest' });
+      }
     });
     document.querySelectorAll('.canvas-view').forEach(view => {
       view.classList.toggle('active', view.getAttribute('data-view') === tabKey);

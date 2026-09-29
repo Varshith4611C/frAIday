@@ -433,8 +433,10 @@
 
 .hs-cards-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
   gap: 12px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .hs-bank-card {
@@ -445,6 +447,11 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .hs-bank-card.tier-mental-model {

@@ -60,7 +60,7 @@ class EmbeddedHindsightEngine:
                 print(f"[HindsightEngine] Warning: Failed to load storage: {e}")
                 self.banks = {}
         if not self.banks or DEFAULT_BANK_ID not in self.banks:
-            self._seed_default_bank(DEFAULT_BANK_ID)
+            self._ensure_bank(DEFAULT_BANK_ID)
 
     def _save(self):
         try:
@@ -494,8 +494,7 @@ class EmbeddedHindsightEngine:
         }
 
     def reset_scenarios(self, bank_id):
-        self._seed_default_bank(bank_id, force=True)
-        return self.get_bank_summary(bank_id)
+        return self.clear_bank(bank_id)
 
     def clear_bank(self, bank_id):
         bank = self._ensure_bank(bank_id)

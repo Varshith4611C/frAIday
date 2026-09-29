@@ -13,7 +13,6 @@ export class HindsightInspector {
     this.container = container;
     this.apiBase = options.apiBase || '';
     this.onToggleMode = options.onToggleMode || null;
-    this.onRunScenario = options.onRunScenario || null;
     
     const storedHindsight = typeof localStorage !== 'undefined' ? localStorage.getItem('fraiday_hindsight_enabled') : null;
     this.isHindsightEnabled = storedHindsight !== null ? storedHindsight === 'true' : true;
@@ -23,7 +22,6 @@ export class HindsightInspector {
     this.recallStream = [];
     this.reflectionResult = null;
     this.isReflecting = false;
-    this.scenarios = [];
 
     this.init();
   }
@@ -103,17 +101,17 @@ export class HindsightInspector {
   }
 
   async resetScenarios() {
-    const choice = confirm('Do you want to reset Vectorize Hindsight Memory Bank?\n\n• OK: Reset to benchmark state (clears past learned preferences & restores clean baseline)\n• Cancel: Keep current memories');
+    const choice = confirm('Do you want to clear the Vectorize Hindsight Memory Bank?\n\n• OK: Wipe all stored memories and start clean\n• Cancel: Keep current memories');
     if (!choice) return;
     try {
-      await fetch(`${this.apiBase}/api/hindsight/reset`, { method: 'POST' });
+      await fetch(`${this.apiBase}/api/hindsight/clear`, { method: 'POST' });
       this.recallStream = [];
       await this.refreshData();
       if (typeof window !== 'undefined' && window.fraidayApp) {
-        window.fraidayApp.updateHindsightHudPill(this.isHindsightEnabled);
+        window.fraidayApp.updateHindsightHudPill(this.isHindsightEnabled, 0);
         window.fraidayApp.renderSidebarHindsightQuickView();
       }
-      alert('✅ Hindsight Memory Bank has been successfully reset!');
+      alert('✅ Hindsight Memory Bank has been cleared.');
     } catch (err) {
       alert(`Reset failed: ${err.message}`);
     }
@@ -123,12 +121,13 @@ export class HindsightInspector {
     if (!this.container) return;
 
     const stats = this.bankStatus?.stats || {
-      mental_models: 3,
-      observations: 3,
-      world_facts: 2,
-      experience_facts: 2,
-      total: 10
+      mental_models: (this.bankData?.mental_models || []).length,
+      observations: (this.bankData?.observations || []).length,
+      world_facts: (this.bankData?.world_facts || []).length,
+      experience_facts: (this.bankData?.experience_facts || []).length,
+      total: 0
     };
+    stats.total = stats.total || (stats.mental_models + stats.observations + stats.world_facts + stats.experience_facts);
 
     const isCloud = this.bankStatus?.is_cloud_active || false;
     const engineLabel = isCloud ? 'Hindsight Cloud API' : 'Embedded TEMPR Engine';
@@ -400,13 +399,44 @@ export class HindsightInspector {
     }
 
     if (cards.length === 0) {
-      return `<div style="padding:24px;text-align:center;color:var(--text-muted);">No memories found in this tier.</div>`;
+      return `
+        <div class="hs-empty-bank" style="padding:48px 24px;text-align:center;background:rgba(15,23,42,0.4);border:1px dashed var(--border-subtle);border-radius:12px;margin:8px 0;">
+          <span style="font-size:36px;display:block;margin-bottom:12px;">🧠</span>
+          <div style="font-size:14px;font-weight:700;color:#f8fafc;margin-bottom:6px;">Memory Bank is Clean & Ready</div>
+          <div style="font-size:12px;color:var(--text-muted);max-width:440px;margin:0 auto;line-height:1.6;">
+            No memories stored yet. As you build apps, prompt instructions, and share preferences (e.g. <em>"I only like blue theme"</em>), frAIday will automatically retain and recall them here in real time.
+          </div>
+        </div>
+      `;
     }
 
     return `<div class="hs-cards-grid">${cards.join('')}</div>`;
   }
 
   updateStatsAndTiers() {
+    const stats = this.bankStatus?.stats || {
+      mental_models: (this.bankData?.mental_models || []).length,
+      observations: (this.bankData?.observations || []).length,
+      world_facts: (this.bankData?.world_facts || []).length,
+      experience_facts: (this.bankData?.experience_facts || []).length,
+      total: 0
+    };
+    stats.total = stats.total || (stats.mental_models + stats.observations + stats.world_facts + stats.experience_facts);
+
+    if (this.container) {
+      const mmVal = this.container.querySelector('.hs-metric-card[data-tier="mental_models"] .hs-metric-val');
+      if (mmVal) mmVal.textContent = stats.mental_models;
+      const obsVal = this.container.querySelector('.hs-metric-card[data-tier="observations"] .hs-metric-val');
+      if (obsVal) obsVal.textContent = stats.observations;
+      const incVal = this.container.querySelector('.hs-metric-card[data-tier="experience_facts"] .hs-metric-val');
+      if (incVal) incVal.textContent = stats.experience_facts;
+      const wfVal = this.container.querySelector('.hs-metric-card[data-tier="world_facts"] .hs-metric-val');
+      if (wfVal) wfVal.textContent = stats.world_facts;
+
+      const allTab = this.container.querySelector('.hs-tab-btn[data-tab="all"]');
+      if (allTab) allTab.textContent = `All (${stats.total})`;
+    }
+
     const el = this.container?.querySelector('#hs-tier-cards-container');
     if (el) {
       el.innerHTML = this.renderTierCardsHtml();

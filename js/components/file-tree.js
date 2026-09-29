@@ -149,12 +149,19 @@ export class FileTreeComponent {
   getFileIcon(path) {
     if (path.includes('test')) return '🧪';
     if (path.endsWith('.html')) return '🌐';
-    if (path.endsWith('.css')) return '🎨';
+    if (path.endsWith('.css') || path.endsWith('.scss') || path.endsWith('.sass')) return '🎨';
     if (path.includes('store') || path.includes('state')) return '📦';
     if (path.includes('engine')) return '⚙️';
     if (path.includes('component')) return '🧩';
-    if (path.endsWith('.js') || path.endsWith('.mjs')) return '⚡';
-    if (path.endsWith('.json')) return '📋';
+    if (path.endsWith('.js') || path.endsWith('.mjs') || path.endsWith('.cjs')) return '⚡';
+    if (path.endsWith('.ts') || path.endsWith('.tsx')) return '🔷';
+    if (path.endsWith('.jsx')) return '⚛️';
+    if (path.endsWith('.py')) return '🐍';
+    if (path.endsWith('.rs')) return '🦀';
+    if (path.endsWith('.go')) return '🐹';
+    if (path.endsWith('.sql')) return '🗄️';
+    if (path.endsWith('.sh') || path.endsWith('.bat') || path.endsWith('.ps1')) return '💻';
+    if (path.endsWith('.json') || path.endsWith('.yaml') || path.endsWith('.yml') || path.endsWith('.toml')) return '📋';
     if (path.endsWith('.md')) return '📄';
     return '📄';
   }

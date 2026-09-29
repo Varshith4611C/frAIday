@@ -199,7 +199,7 @@ You are powered by Vectorize Hindsight—an agent memory system that learns over
    Whenever the user expresses personal preferences, design aesthetics, color schemes (e.g. "I prefer blue theme", "I only like blue theme", "never use dark theme", "use light theme", "prefer tabs over spaces"), or project conventions:
    a. You MUST IMMEDIATELY call the retain_memory tool to permanently store this preference into Vectorize Hindsight!
       Set memory_type: "mental_model" or "observation" with a clear directive and tags so it persists across all future sessions.
-   b. CRITICAL ACTIVE WORKSPACE APPLICATION: If an application or code already exists in the workspace (such as style.css, index.html, app.js), you MUST NOT stop after calling retain_memory! You MUST ALSO immediately use replace_file_content to update the active workspace code (e.g. restyling style.css to the requested blue theme/aesthetic) in the same turn or next turn, so the live preview immediately changes to match the user's preference! Never leave the existing workspace unchanged when the user expresses a design preference!
+   b. CRITICAL ACTIVE WORKSPACE APPLICATION: If code already exists in the workspace, you MUST NOT stop after calling retain_memory! You MUST ALSO immediately use replace_file_content to update the active workspace code (e.g. applying the requested theme, style, configuration, or logic) in the same turn or next turn, so the project immediately changes to match the user's preference! Never leave the existing workspace unchanged when the user expresses a preference!
 5. EXPLICIT MEMORY RECALL:
    If the user says "use my previous preferences", "what are my preferences?", or references past tasks, you can call recall_memory to fetch all matching memories from Hindsight.
 </hindsight_memory_layer>
@@ -228,9 +228,9 @@ PHASE 1: UPFRONT RESEARCH & MANDATORY PLANNING GATE (Before user clicks proceed)
   ### Automated Tests
   Commands to run.
   ### Manual Verification
-  Headless Chrome visual audit via browser_subagent.
+  Verification steps (Headless Chrome visual audit via browser_subagent for web apps, or CLI/test execution via run_command for backend/scripts).
 - Once implementation_plan.md is written, execution will pause for the user to review and click "Approve & Proceed".
-- DO NOT create code files (HTML, CSS, JS) or walkthrough.md before plan approval!
+- DO NOT create code files or walkthrough.md before plan approval!
 
 PHASE 2: EXECUTION & AUTONOMOUS CODE SYNTHESIS:
 - After the plan is approved, write new code files using write_to_file.
@@ -246,27 +246,28 @@ PHASE 2: EXECUTION & AUTONOMOUS CODE SYNTHESIS:
   * When a command or test exits with code != 0 or returns stderr, the full error is provided in your tool response.
   * Carefully examine the traceback or compiler message to identify the offending file and line.
   * Apply a surgical fix using replace_file_content, and re-run the test to verify the exit code is 0.
-- For web applications, create clean, modern index.html, style.css, and app.js.
+- For web applications, create clean, modern index.html, style.css, and app.js (or modular component files). For backend, Python, Node, CLI tools, scripts, or data projects, create the appropriate language files, entry points (e.g. main.py, server.py, index.ts), configuration, and tests.
 - CRITICAL BROWSER FRONTEND vs NODE.JS EXECUTION RULE:
   Browser client scripts (e.g. app.js with document, window, localStorage, addEventListener, Canvas/WebGL) RUN ONLY IN THE WEB BROWSER.
   NEVER attempt to execute client-side browser files with Node.js in the terminal (e.g. DO NOT run node app.js). Node.js has no DOM window or document globals.
   ONLY use run_command for backend Python/Node servers, package managers (pip install, npm install), or CLI test runners.
 
-PHASE 3: TESTING & MULTIMODAL AI VISION AUDIT:
-- Call browser_subagent to launch headless Chrome, render the live preview at http://localhost:8080/workspace/index.html, take a screenshot, and verify with the multimodal AI vision model that the page renders cleanly with high visual quality score and 0 console errors.
-- If errors, exceptions, or visual defects (blank screen, unstyled layout, misaligned elements) are detected by the vision model, diagnose them immediately with view_file or search_web, patch with replace_file_content, and re-audit with browser_subagent.
+PHASE 3: TESTING & VERIFICATION:
+- For web applications with an HTML frontend: Call browser_subagent to launch headless Chrome, render the live preview at http://localhost:8080/workspace/index.html, take a screenshot, and verify with the multimodal AI vision model that the page renders cleanly with high visual quality score and 0 console errors.
+- For backend, Python, Node, CLI, or script projects: Run the script or test suite using run_command to verify clean execution with exit code 0 and valid output.
+- If errors, exceptions, or visual defects are detected, diagnose them immediately with view_file or search_web, patch with replace_file_content, and re-verify.
 
 PHASE 4: WALKTHROUGH DOCUMENTATION (Definition of Done - Strictly Created at Last):
-- walkthrough.md is the final completion certificate. It MUST ONLY be created at Phase 4, AFTER Phase 2 code is created AND Phase 3 browser_subagent visual verification has certified 0 errors and a clean visual score!
+- walkthrough.md is the final completion certificate. It MUST ONLY be created at Phase 4, AFTER Phase 2 code is created AND Phase 3 verification (browser_subagent for web apps or run_command for backend/CLI) has certified 0 errors and a clean result!
 - NEVER create walkthrough.md during Phase 1, Phase 2, or during error diagnostics!
 - walkthrough.md must document:
   # Walkthrough - [Goal Title]
   ## Changes Made
   - List of files created/modified
   ## Verification Results
-  - Multimodal AI Vision verification score (e.g. 10/10), visual layout critique, DOM element count, and clean error check
-  ## Live Preview
-  - Instructions to view http://localhost:8080/workspace/index.html
+  - Verification results: AI Vision verification score and layout check (for web apps) or automated test / CLI command execution results (for backend/CLI apps), confirming 0 runtime errors.
+  ## Live Preview / Usage Instructions
+  - Instructions to view the live preview at http://localhost:8080/workspace/index.html (for web apps) or run/test the code via terminal (for backend/CLI apps).
 </planning_mode>
 
 <communication_style>
@@ -1397,14 +1398,24 @@ export class AgentEngine {
   }
 
   checkCodeCreated() {
-    return this.conversationHistory.some(m =>
-      m.role === 'tool' && (
-        (m.content || '').includes('.html') ||
-        (m.content || '').includes('.js') ||
-        (m.content || '').includes('.css') ||
-        (m.content || '').includes('.py')
-      )
-    );
+    // Check if any non-markdown source files exist in fileTree
+    const existingCode = (this.fileTree?.files || []).some(f => {
+      const p = (f.path || '').toLowerCase();
+      return !p.endsWith('.md') && !p.endsWith('.txt') && !p.startsWith('.system_generated');
+    });
+    if (existingCode) return true;
+
+    return this.conversationHistory.some(m => {
+      if (m.role !== 'tool') return false;
+      const content = m.content || '';
+      if (m.name === 'write_to_file' || m.name === 'replace_file_content' || m.name === 'multi_replace_file_content' || content.includes('"TargetFile"')) {
+        const isPlanOrWalkthrough = /("TargetFile":\s*"(implementation_plan|walkthrough)\.md")/i.test(content);
+        if (!isPlanOrWalkthrough && (content.includes('"success": true') || content.includes('"success":true') || content.includes('TargetFile'))) {
+          return true;
+        }
+      }
+      return /\.(html|css|js|mjs|cjs|jsx|ts|tsx|vue|svelte|py|json|sql|rs|go|c|cpp|h|hpp|cs|java|rb|php|sh|bat|ps1|yaml|yml|toml|xml)/i.test(content);
+    });
   }
 
   waitForPlanApproval() {
@@ -1610,7 +1621,7 @@ export class AgentEngine {
         if (!hasCode) {
           this.conversationHistory.push({
             role: 'user',
-            content: 'Plan approved. Now proceed immediately to create the source code files: use write_to_file to write new index.html, style.css, and app.js.'
+            content: 'Plan approved. Now proceed immediately to create the source code files: use write_to_file to write the planned source code files.'
           });
           continue;
         }
@@ -1637,7 +1648,7 @@ export class AgentEngine {
         if (hasCode && !codeModifiedSinceUserPrompt && (onlyMemoryToolsCalled || isStyleOrChangeRequest)) {
           this.conversationHistory.push({
             role: 'user',
-            content: `You have called Hindsight memory tools, but the active workspace files have NOT been updated yet! The user requested: "${this.currentGoal}". Please use view_file to inspect the current code, and use replace_file_content to update style.css (and index.html if needed) so that the running application immediately reflects the user's requested preference in the live preview.`
+            content: `You have called Hindsight memory tools, but the active workspace files have NOT been updated yet! The user requested: "${this.currentGoal}". Please use view_file to inspect the current code, and use replace_file_content to update the active workspace code so that the project immediately reflects the user's requested preference.`
           });
           continue;
         }
@@ -1662,12 +1673,17 @@ export class AgentEngine {
           continue;
         }
 
-        // Both code, headless browser audit, and walkthrough.md are complete!
+        // Both code, verification, and walkthrough.md are complete!
+        const hasHtmlInProject = (this.fileTree?.files || []).some(f => (f.path || '').toLowerCase().endsWith('.html'));
         this.setState('completed');
         this.terminal?.appendOutput(`═══════════════════════════════════════════════════════════════`, 'success');
         this.terminal?.appendOutput(`🎉 DEFINITION OF DONE: frAIday Completed Objective`, 'success');
-        this.terminal?.appendOutput(`   • Live Preview: http://localhost:8080/workspace/index.html`, 'success');
-        this.terminal?.appendOutput(`   • Verification: Headless Chrome & Terminal Certified`, 'success');
+        if (hasHtmlInProject) {
+          this.terminal?.appendOutput(`   • Live Preview: http://localhost:8080/workspace/index.html`, 'success');
+          this.terminal?.appendOutput(`   • Verification: Headless Chrome & Terminal Certified`, 'success');
+        } else {
+          this.terminal?.appendOutput(`   • Verification: Terminal & Execution Suite Certified`, 'success');
+        }
         this.terminal?.appendOutput(`   • Artifact: walkthrough.md Generated`, 'success');
         this.terminal?.appendOutput(`═══════════════════════════════════════════════════════════════`, 'success');
 
@@ -1794,13 +1810,17 @@ export class AgentEngine {
           continue;
         }
 
-        // STRICT WALKTHROUGH GATE: Disallow writing walkthrough.md until code exists, browser audit has run, and ZERO errors remain
+        // STRICT WALKTHROUGH GATE: Disallow writing walkthrough.md until code exists, verification has run, and ZERO errors remain
         if (toolName === 'write_to_file' && isWalkthroughFile) {
           const hasCode = this.checkCodeCreated();
+          const hasHtml = (this.fileTree?.files || []).some(f => (f.path || '').toLowerCase().endsWith('.html')) ||
+            this.conversationHistory.some(m => m.role === 'tool' && (m.content || '').includes('.html'));
           const hasBrowserAudit = this.conversationHistory.some(m => m.name === 'browser_subagent' || (m.role === 'tool' && (m.content || '').includes('browser_subagent')));
+          const hasCliRun = this.conversationHistory.some(m => m.name === 'run_command' || (m.role === 'tool' && (m.content || '').includes('run_command')));
+          const hasVerification = hasHtml ? hasBrowserAudit : (hasBrowserAudit || hasCliRun);
           const hasActiveErrors = this.activeRuntimeErrors && this.activeRuntimeErrors.size > 0;
 
-          // Check if latest browser audit had visual defects or failed AI Vision verification
+          // Check if latest browser audit had visual defects or failed AI Vision verification (only if browser audit was run)
           let hasVisualDefects = false;
           let visualDefectMsg = "";
           for (let i = this.conversationHistory.length - 1; i >= 0; i--) {
@@ -1817,15 +1837,17 @@ export class AgentEngine {
             }
           }
 
-          if (!hasCode || !hasBrowserAudit || hasActiveErrors || hasVisualDefects) {
+          if (!hasCode || !hasVerification || hasActiveErrors || hasVisualDefects) {
             let reason = "";
             if (!hasCode) {
-              reason = "Application code files (index.html, style.css, app.js) have not been created yet.";
-            } else if (!hasBrowserAudit) {
-              reason = "Headless browser multimodal verification (browser_subagent) has not been performed yet. You must audit the live render before generating walkthrough.md.";
+              reason = "Application code files have not been created yet.";
+            } else if (!hasVerification) {
+              reason = hasHtml
+                ? "Headless browser multimodal verification (browser_subagent) has not been performed yet. You must audit the live render before generating walkthrough.md."
+                : "Automated test or execution verification (via run_command) has not been performed yet. You must verify the application runs cleanly before generating walkthrough.md.";
             } else if (hasActiveErrors) {
               const errList = Array.from(this.activeRuntimeErrors.keys()).join('; ');
-              reason = `The application has active runtime errors that MUST be fixed: [${errList}]. Use view_file to inspect, replace_file_content to patch code, and browser_subagent to verify clean execution with 0 errors before generating walkthrough.md.`;
+              reason = `The application has active runtime errors that MUST be fixed: [${errList}]. Use view_file to inspect, replace_file_content to patch code, and verify clean execution with 0 errors before generating walkthrough.md.`;
             } else if (hasVisualDefects) {
               reason = `Multimodal AI Vision model detected visual defects: [${visualDefectMsg}]. You must fix layout/styling issues and verify with browser_subagent before generating walkthrough.md.`;
             }
@@ -1928,7 +1950,7 @@ export class AgentEngine {
             }
             this.conversationHistory.push({
               role: 'user',
-              content: `The implementation plan has been approved by the user! Proceed immediately to synthesize the real source code files (index.html, style.css, app.js), verify with browser_subagent, and write walkthrough.md.`
+              content: `The implementation plan has been approved by the user! Proceed immediately to synthesize the real source code files as proposed in your plan, verify your implementation (via browser_subagent for web apps or run_command for backend/scripts), and write walkthrough.md.`
             });
             break; // Proceed to next turn with approval confirmed
           }

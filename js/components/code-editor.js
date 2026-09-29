@@ -414,10 +414,17 @@ export class CodeEditorComponent {
   detectLanguage(filepath) {
     if (!filepath) return 'javascript';
     if (filepath.endsWith('.html')) return 'html';
-    if (filepath.endsWith('.css')) return 'css';
+    if (filepath.endsWith('.css') || filepath.endsWith('.scss')) return 'css';
     if (filepath.endsWith('.sql')) return 'sql';
     if (filepath.endsWith('.json')) return 'json';
     if (filepath.endsWith('.py')) return 'python';
+    if (filepath.endsWith('.ts') || filepath.endsWith('.tsx')) return 'typescript';
+    if (filepath.endsWith('.jsx')) return 'javascript';
+    if (filepath.endsWith('.rs')) return 'rust';
+    if (filepath.endsWith('.go')) return 'go';
+    if (filepath.endsWith('.sh') || filepath.endsWith('.bat') || filepath.endsWith('.ps1')) return 'shell';
+    if (filepath.endsWith('.yaml') || filepath.endsWith('.yml')) return 'yaml';
+    if (filepath.endsWith('.md')) return 'markdown';
     return 'javascript';
   }
 }

@@ -1578,9 +1578,22 @@ class FrAIdayHandler(http.server.SimpleHTTPRequestHandler):
     def handle_llm_chat(self, body):
         prompt = body.get("prompt", "")
         messages = body.get("messages", [])
-        api_key = body.get("api_key") or ACTIVE_CONFIG["api_key"]
-        model = body.get("model") or ACTIVE_CONFIG["model"]
-        provider = body.get("provider") or ACTIVE_CONFIG["provider"]
+        provider = body.get("provider") or ACTIVE_CONFIG.get("provider", "groq")
+        model = body.get("model") or (ACTIVE_CONFIG["model"] if provider == ACTIVE_CONFIG.get("provider") else None)
+
+        # Resolve provider-specific API key safely
+        if body.get("api_key"):
+            api_key = str(body["api_key"]).strip()
+        elif provider == ACTIVE_CONFIG.get("provider") and ACTIVE_CONFIG.get("api_key"):
+            api_key = str(ACTIVE_CONFIG["api_key"]).strip()
+        elif provider == "groq":
+            api_key = os.environ.get("GROQ_API_KEY", "")
+        elif provider == "nvidia":
+            api_key = os.environ.get("NVIDIA_API_KEY", "")
+        elif provider == "openai":
+            api_key = os.environ.get("OPENAI_API_KEY", "")
+        else:
+            api_key = ""
 
         if not messages and prompt:
             messages = [{"role": "user", "content": prompt}]
@@ -1589,14 +1602,15 @@ class FrAIdayHandler(http.server.SimpleHTTPRequestHandler):
             global GROQ_KEY_INDEX
             url = "https://api.groq.com/openai/v1/chat/completions"
             client_keys = [k.strip() for k in re.split(r'[,;\n\r\s]+', str(api_key or "")) if k.strip()]
-            server_keys = [k.strip() for k in re.split(r'[,;\n\r\s]+', str(ACTIVE_CONFIG.get("api_key") or DEFAULT_GROQ_KEY)) if k.strip()]
-            # Always ensure the full pool of keys is active to prevent single-key rate limits
-            if len(server_keys) > len(client_keys):
-                groq_keys = server_keys
-            else:
-                groq_keys = client_keys or server_keys
+            server_keys = [k.strip() for k in re.split(r'[,;\n\r\s]+', str(ACTIVE_CONFIG.get("api_key") if ACTIVE_CONFIG.get("provider") == "groq" else DEFAULT_GROQ_KEY)) if k.strip()]
+            groq_keys = client_keys or server_keys
             if not groq_keys:
-                groq_keys = [DEFAULT_GROQ_KEY]
+                self.send_json(400, {
+                    "error": "No API key configured for Groq. Please enter your API key in Settings or enter it when prompted.",
+                    "missing_api_key": True,
+                    "provider": "groq"
+                })
+                return
 
             groq_model = model or "openai/gpt-oss-120b"
             if groq_model in ("gpt-oss-120b", "openai-gpt-oss-120b", "openai/gpt-oss-120b"):
@@ -1779,6 +1793,13 @@ class FrAIdayHandler(http.server.SimpleHTTPRequestHandler):
 
 
         elif provider == "nvidia":
+            if not api_key:
+                self.send_json(400, {
+                    "error": "No API key configured for NVIDIA NIM. Please enter your API key in Settings or enter it when prompted.",
+                    "missing_api_key": True,
+                    "provider": "nvidia"
+                })
+                return
             url = "https://integrate.api.nvidia.com/v1/chat/completions"
             payload = {
                 "model": model,
@@ -1813,6 +1834,13 @@ class FrAIdayHandler(http.server.SimpleHTTPRequestHandler):
             self.send_json(500, {"error": f"NVIDIA Gateway Timeout/Error: {str(last_err)}"})
 
         elif provider == "openai":
+            if not api_key:
+                self.send_json(400, {
+                    "error": "No API key configured for OpenAI. Please enter your API key in Settings or enter it when prompted.",
+                    "missing_api_key": True,
+                    "provider": "openai"
+                })
+                return
             url = "https://api.openai.com/v1/chat/completions"
             payload = {
                 "model": model or "gpt-4o-mini",
@@ -2923,7 +2951,11 @@ def run():
     print(f"  Workspace Root: {WORKSPACE_DIR}")
     print(f"  Live Preview:   http://localhost:{PORT}/workspace/index.html")
     print(f"  AI Provider:    {ACTIVE_CONFIG['provider'].upper()} ({ACTIVE_CONFIG['model']})")
-    print(f"  Key Status:     Loaded ({ACTIVE_CONFIG['api_key'][:10]}...)")
+    if ACTIVE_CONFIG.get('api_key'):
+        masked = ACTIVE_CONFIG['api_key'][:8] + "..." + ACTIVE_CONFIG['api_key'][-4:] if len(ACTIVE_CONFIG['api_key']) > 14 else "***"
+        print(f"  Key Status:     Loaded ({masked})")
+    else:
+        print(f"  Key Status:     ⚠️  No API key configured (prompting user in browser UI)")
     print(f"=====================================================")
     while True:
         try:

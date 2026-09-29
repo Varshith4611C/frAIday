@@ -1,4 +1,10 @@
 .env
+.env.*
+*.env
+.env.local
+*.key
+*.pem
+*.secret
 .fraiday_session*.json
 .fraiday_session_*.tmp
 .fraiday_active_workspace.txt

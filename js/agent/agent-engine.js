@@ -408,6 +408,11 @@ export class AgentEngine {
     }
   }
 
+  hasValidApiKey() {
+    if (this.provider === 'ollama') return true;
+    return Boolean(this.apiKey && this.apiKey.trim());
+  }
+
   saveSession() {
     try {
       const monologueBody = this.monologueEl ? (this.monologueEl.querySelector('.monologue-text') || this.monologueEl) : null;
@@ -1183,6 +1188,16 @@ export class AgentEngine {
         if (!resp.ok) {
           const err = await resp.json().catch(() => ({}));
           const errMsg = err.error || '';
+          if (resp.status === 401 || err.missing_api_key || /invalid_api_key|no api key|unauthorized/i.test(errMsg)) {
+            if (typeof this.onApiKeyRequired === 'function') {
+              this.onApiKeyRequired({
+                provider: this.provider,
+                goal: this.currentGoal,
+                error: errMsg || 'Invalid or missing API key'
+              });
+            }
+            throw new Error(errMsg || `API key error: Authentication failed for ${this.provider.toUpperCase()}. Please enter a valid API key.`);
+          }
           if (resp.status === 413 || /too large|tpm|8000|413|request size/i.test(errMsg)) {
             console.warn(`[frAIday Gateway] TPM / Request size exceeded (HTTP 413). Compacting context and retrying...`);
             this.terminal?.appendOutput(`⚡ Auto-compressing history to preserve code generation capacity (attempt ${attempt}/6)...`, 'info');
@@ -1423,6 +1438,21 @@ export class AgentEngine {
     if (!goal || !goal.trim()) return;
     this.currentGoal = goal.trim();
     this.isAborted = false;
+
+    if (!this.hasValidApiKey()) {
+      this.setState('idle', 'API Key Required');
+      if (this.terminal) {
+        this.terminal.appendOutput(`⚠️ [API Key Required] No API key configured for ${this.provider.toUpperCase()}. Please enter your API key to run this objective.`, 'warn');
+      }
+      if (typeof this.onApiKeyRequired === 'function') {
+        this.onApiKeyRequired({
+          provider: this.provider,
+          goal: this.currentGoal
+        });
+      }
+      return;
+    }
+
     this.abortController = new AbortController();
     this.turnCount = 0;
     this.recentToolCalls = []; // Reset deduplication cache for the new user prompt

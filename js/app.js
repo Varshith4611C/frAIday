@@ -183,12 +183,19 @@ class AppCoordinator {
       }
     };
 
+    // Wire agentEngine callbacks for API key requirements
+    this.agentEngine.onApiKeyRequired = ({ provider, goal, error }) => {
+      const msg = error || `An API key is required to execute tasks with ${provider ? provider.toUpperCase() : 'AI'}.`;
+      this.showApiKeyModal(msg, goal, provider);
+    };
+
     // 2. Setup DOM Events
     this.bindHudControls();
     this.bindCanvasTabs();
     this.bindActivityBar();
     this.bindPreviewControls();
     this.bindSettingsModal();
+    this.bindApiKeyModal();
     this.bindContextualInput();
     this.bindPlanApprovalControls();
 
@@ -1505,9 +1512,18 @@ class AppCoordinator {
       .replace(/^gpt-4o-mini$/i, 'GPT-4o Mini')
       .replace(/^gpt-4o$/i, 'GPT-4o');
 
-    const fullHud = `${pLabel} (${shortName})`;
+    const activeKey = this.agentEngine?.apiKey || localStorage.getItem('fraiday_api_key') || localStorage.getItem(`fraiday_key_${provider}`) || '';
+    const hasKey = provider === 'ollama' || Boolean(activeKey && activeKey.trim());
+
+    const fullHud = hasKey ? `${pLabel} (${shortName})` : `${pLabel} (⚠️ No Key)`;
     if (hudModelName) hudModelName.innerText = fullHud;
-    if (monoBadge) monoBadge.innerText = `${pLabel} · ${shortName}`;
+    if (monoBadge) monoBadge.innerText = hasKey ? `${pLabel} · ${shortName}` : `${pLabel} · ⚠️ Key Required`;
+
+    const hudPill = document.getElementById('hud-model-pill');
+    if (hudPill) {
+      const dot = hudPill.querySelector('span:first-child');
+      if (dot) dot.style.color = hasKey ? '#10b981' : '#f59e0b';
+    }
   }
 
   async syncInitialConfig() {
@@ -1527,7 +1543,7 @@ class AppCoordinator {
         localStorage.setItem('fraiday_model', activeModel);
         localStorage.setItem(`fraiday_model_${activeProvider}`, activeModel);
 
-        // Upgrade/sync API keys from server
+        // Upgrade/sync API keys from server or local storage
         let activeKey = data.api_key || localStorage.getItem('fraiday_api_key') || providerConfig.defaultKey || '';
         if (data.api_key) {
           activeKey = data.api_key;
@@ -1542,13 +1558,15 @@ class AppCoordinator {
         if (this.agentEngine) {
           this.agentEngine.provider = activeProvider;
           this.agentEngine.model = activeModel;
-          if (activeKey) this.agentEngine.apiKey = activeKey;
+          this.agentEngine.apiKey = activeKey;
         }
 
         this.updateModelDisplay(activeProvider, activeModel);
+        this.updateApiKeyBannerStatus();
       }
     } catch (_) {
       this.updateModelDisplay(this.agentEngine.provider, this.agentEngine.model);
+      this.updateApiKeyBannerStatus();
     }
   }
 
@@ -1872,6 +1890,297 @@ class AppCoordinator {
     }
   }
 
+  updateApiKeyBannerStatus() {
+    const banner = document.getElementById('api-key-banner');
+    const hudPill = document.getElementById('hud-model-pill');
+    const hudModelName = document.getElementById('hud-model-name');
+    const activeProvider = this.agentEngine?.provider || localStorage.getItem('fraiday_provider') || 'groq';
+    const activeKey = this.agentEngine?.apiKey || localStorage.getItem('fraiday_api_key') || localStorage.getItem(`fraiday_key_${activeProvider}`) || '';
+    const hasKey = activeProvider === 'ollama' || Boolean(activeKey && activeKey.trim());
+
+    if (banner) {
+      banner.style.display = hasKey ? 'none' : 'flex';
+    }
+
+    if (hudPill) {
+      const dot = hudPill.querySelector('span:first-child');
+      if (dot) {
+        dot.style.color = hasKey ? '#10b981' : '#f59e0b';
+      }
+      if (!hasKey && hudModelName) {
+        hudModelName.innerText = `${activeProvider.toUpperCase()} (⚠️ No Key)`;
+      }
+    }
+  }
+
+  showApiKeyModal(reason = '', pendingGoal = null, targetProvider = null) {
+    const modal = document.getElementById('api-key-modal');
+    if (!modal) {
+      this.openSettingsModal();
+      return;
+    }
+
+    this._pendingGoalAfterApiKey = pendingGoal;
+
+    const providerSelect = document.getElementById('quick-key-provider');
+    const keyInput = document.getElementById('quick-api-key-input');
+    const errorBox = document.getElementById('quick-key-error');
+    const reasonEl = document.getElementById('api-key-modal-reason');
+
+    if (errorBox) {
+      errorBox.style.display = 'none';
+      errorBox.innerText = '';
+    }
+
+    const currentProvider = targetProvider || this.agentEngine?.provider || localStorage.getItem('fraiday_provider') || 'groq';
+    if (providerSelect) providerSelect.value = currentProvider;
+
+    const savedKey = localStorage.getItem(`fraiday_key_${currentProvider}`) || localStorage.getItem('fraiday_api_key') || '';
+    if (keyInput) {
+      keyInput.value = savedKey;
+      setTimeout(() => {
+        try { keyInput.focus(); } catch (_) {}
+      }, 100);
+    }
+
+    if (reasonEl) {
+      if (reason) {
+        reasonEl.innerHTML = `<span style="color:#fbbf24;font-weight:600;">Action Required:</span> ${reason}`;
+      } else if (pendingGoal) {
+        const truncated = pendingGoal.length > 70 ? pendingGoal.slice(0, 70) + '...' : pendingGoal;
+        reasonEl.innerHTML = `Enter an API key to execute: <code style="color:#38bdf8;">${this.escapeInlineMd(truncated)}</code>`;
+      } else {
+        reasonEl.innerHTML = 'An API key is required to power frAIday\'s autonomous coding, reasoning, and execution loop.';
+      }
+    }
+
+    this.updateQuickModalProviderUI(currentProvider);
+
+    modal.classList.add('open');
+    modal.style.display = 'flex';
+    modal.style.opacity = '1';
+    modal.style.visibility = 'visible';
+  }
+
+  closeApiKeyModal() {
+    const modal = document.getElementById('api-key-modal');
+    if (modal) {
+      modal.classList.remove('open');
+      modal.style.display = 'none';
+      modal.style.opacity = '0';
+      modal.style.visibility = 'hidden';
+    }
+  }
+
+  updateQuickModalProviderUI(provider) {
+    const linkEl = document.getElementById('quick-key-signup-link');
+    const inputContainer = document.getElementById('quick-key-input-container');
+    const hintEl = document.getElementById('quick-key-hint');
+    const inputEl = document.getElementById('quick-api-key-input');
+
+    if (!inputContainer) return;
+
+    if (provider === 'ollama') {
+      inputContainer.style.display = 'none';
+      if (hintEl) {
+        hintEl.style.display = 'block';
+        hintEl.innerHTML = '⚡ <strong>Ollama Localhost:</strong> Runs entirely on your local machine. No API key required!';
+      }
+    } else {
+      inputContainer.style.display = 'block';
+      if (inputEl) {
+        if (provider === 'groq') {
+          inputEl.placeholder = 'Paste your Groq key (e.g. gsk_...)';
+        } else if (provider === 'nvidia') {
+          inputEl.placeholder = 'Paste your NVIDIA NIM key (e.g. nvapi-...)';
+        } else if (provider === 'openai') {
+          inputEl.placeholder = 'Paste your OpenAI key (e.g. sk-...)';
+        } else {
+          inputEl.placeholder = 'Paste your API key here...';
+        }
+      }
+
+      if (linkEl) {
+        if (provider === 'groq') {
+          linkEl.style.display = 'inline';
+          linkEl.href = 'https://console.groq.com/keys';
+          linkEl.innerText = 'Get free Groq key ↗';
+        } else if (provider === 'nvidia') {
+          linkEl.style.display = 'inline';
+          linkEl.href = 'https://build.nvidia.com';
+          linkEl.innerText = 'Get NVIDIA NIM key ↗';
+        } else if (provider === 'openai') {
+          linkEl.style.display = 'inline';
+          linkEl.href = 'https://platform.openai.com/api-keys';
+          linkEl.innerText = 'Get OpenAI key ↗';
+        } else {
+          linkEl.style.display = 'none';
+        }
+      }
+
+      if (hintEl) {
+        hintEl.style.display = 'block';
+        if (provider === 'groq') {
+          hintEl.innerHTML = 'Groq API keys start with <code>gsk_</code>. Supports pooling multiple keys separated by commas.';
+        } else if (provider === 'nvidia') {
+          hintEl.innerHTML = 'NVIDIA NIM keys start with <code>nvapi-</code>.';
+        } else {
+          hintEl.innerHTML = `Enter your API key for ${provider.toUpperCase()}. Saved in local storage only.`;
+        }
+      }
+    }
+  }
+
+  async saveQuickApiKey() {
+    const providerSelect = document.getElementById('quick-key-provider');
+    const keyInput = document.getElementById('quick-api-key-input');
+    const errorBox = document.getElementById('quick-key-error');
+    const saveBtn = document.getElementById('btn-save-quick-key');
+
+    const provider = providerSelect ? providerSelect.value : 'groq';
+    const apiKey = keyInput ? keyInput.value.trim() : '';
+
+    if (provider !== 'ollama' && !apiKey) {
+      if (errorBox) {
+        errorBox.style.display = 'block';
+        errorBox.innerText = `Please enter an API key for ${provider.toUpperCase()} or select Ollama.`;
+      }
+      if (keyInput) keyInput.focus();
+      return;
+    }
+
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.innerText = 'Connecting...';
+    }
+
+    try {
+      // 1. Persist locally immediately (never committed to git)
+      localStorage.setItem('fraiday_provider', provider);
+      localStorage.setItem('fraiday_api_key', apiKey);
+      localStorage.setItem(`fraiday_key_${provider}`, apiKey);
+
+      const pConfig = PROVIDER_PRESETS[provider] || PROVIDER_PRESETS.groq;
+      const model = localStorage.getItem(`fraiday_model_${provider}`) || localStorage.getItem('fraiday_model') || pConfig.defaultModel;
+      localStorage.setItem('fraiday_model', model);
+
+      // 2. Update engine
+      if (this.agentEngine) {
+        this.agentEngine.setLlmConfig(provider, apiKey, model);
+        this.agentEngine.setState('idle', 'Ready');
+      }
+
+      // 3. Sync to backend server
+      await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider, api_key: apiKey, model, safety: localStorage.getItem('fraiday_safety') || 'request_review' })
+      }).catch(console.warn);
+
+      // 4. Update UI HUD and Banner
+      this.updateModelDisplay(provider, model);
+      this.updateApiKeyBannerStatus();
+
+      // Clear any halt cards
+      const chatTimeline = document.getElementById('chat-timeline');
+      if (chatTimeline) {
+        chatTimeline.querySelectorAll('.chat-halted-row').forEach(el => el.remove());
+      }
+
+      // 5. Close modal
+      this.closeApiKeyModal();
+
+      // 6. Resume pending goal if present
+      const queuedGoal = this._pendingGoalAfterApiKey;
+      this._pendingGoalAfterApiKey = null;
+      if (queuedGoal && this.agentEngine) {
+        this.terminal?.appendOutput(`🔑 API key configured for ${provider.toUpperCase()}. Executing objective: "${queuedGoal}"`, 'success');
+        this.agentEngine.executeGoal(queuedGoal);
+      } else {
+        this.terminal?.appendOutput(`✔ API key configured for ${provider.toUpperCase()}. frAIday AI Engine is online and ready.`, 'success');
+      }
+    } catch (err) {
+      if (errorBox) {
+        errorBox.style.display = 'block';
+        errorBox.innerText = `Error saving configuration: ${err.message}`;
+      }
+    } finally {
+      if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = '<span>Save & Continue</span><span>➔</span>';
+      }
+    }
+  }
+
+  bindApiKeyModal() {
+    const modal = document.getElementById('api-key-modal');
+    const closeBtn = document.getElementById('btn-close-api-key-modal');
+    const cancelBtn = document.getElementById('btn-cancel-quick-key');
+    const saveBtn = document.getElementById('btn-save-quick-key');
+    const toggleVisBtn = document.getElementById('btn-toggle-quick-key-visibility');
+    const providerSelect = document.getElementById('quick-key-provider');
+    const keyInput = document.getElementById('quick-api-key-input');
+    const bannerBtn = document.getElementById('btn-banner-enter-key');
+
+    if (bannerBtn) {
+      bannerBtn.addEventListener('click', () => {
+        this.showApiKeyModal('Configure your API key to activate frAIday.');
+      });
+    }
+
+    if (closeBtn) closeBtn.addEventListener('click', () => this.closeApiKeyModal());
+    if (cancelBtn) cancelBtn.addEventListener('click', () => this.closeApiKeyModal());
+
+    if (toggleVisBtn && keyInput) {
+      toggleVisBtn.addEventListener('click', () => {
+        const isPass = keyInput.type === 'password';
+        keyInput.type = isPass ? 'text' : 'password';
+        toggleVisBtn.innerText = isPass ? '🙈' : '👁️';
+      });
+    }
+
+    if (providerSelect) {
+      providerSelect.addEventListener('change', (e) => {
+        const prov = e.target.value;
+        const saved = localStorage.getItem(`fraiday_key_${prov}`) || '';
+        if (keyInput) keyInput.value = saved;
+        this.updateQuickModalProviderUI(prov);
+      });
+    }
+
+    if (keyInput) {
+      keyInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          this.saveQuickApiKey();
+        }
+      });
+    }
+
+    if (saveBtn) {
+      saveBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.saveQuickApiKey();
+      });
+    }
+
+    if (modal) {
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) this.closeApiKeyModal();
+      });
+    }
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && modal && modal.classList.contains('open')) {
+        this.closeApiKeyModal();
+      }
+    });
+
+    window.openApiKeyModal = (reason, goal) => {
+      this.showApiKeyModal(reason, goal);
+    };
+  }
+
   bindActivityBar() {
     document.querySelectorAll('.activity-btn').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -1921,6 +2230,10 @@ class AppCoordinator {
         const goal = arg || (errors.length > 0
           ? `Diagnose and fix the following runtime errors in the application: ${errors.join('; ')}`
           : 'Audit all workspace files and fix any syntax or runtime bugs');
+        if (!this.agentEngine?.hasValidApiKey()) {
+          this.showApiKeyModal('An API key is required to execute autonomous diagnosis & fix.', goal);
+          return;
+        }
         this.agentEngine.executeGoal(goal);
       } else if (command === '/test') {
         this.switchTab('terminal');
@@ -1937,6 +2250,10 @@ class AppCoordinator {
         }
       } else if (command === '/plan') {
         const goal = arg || 'Research modern UI best practices and architect a full-featured web application';
+        if (!this.agentEngine?.hasValidApiKey()) {
+          this.showApiKeyModal('An API key is required to generate an architectural plan.', goal);
+          return;
+        }
         this.agentEngine.executeGoal(goal);
       } else if (command === '/audit') {
         const viewScreenshotBtn = document.getElementById('btn-view-screenshot');
@@ -1970,12 +2287,17 @@ class AppCoordinator {
     const handleSend = () => {
       const val = input.value.trim();
       if (!val) return;
-      input.value = '';
       hideSlashPopup();
 
       if (val.startsWith('/')) {
+        input.value = '';
         executeSlashCommand(val);
       } else {
+        if (!this.agentEngine?.hasValidApiKey()) {
+          this.showApiKeyModal(`Please enter your API key to execute: "${val.length > 60 ? val.slice(0, 60) + '...' : val}"`, val);
+          return;
+        }
+        input.value = '';
         this.agentEngine.executeGoal(val);
       }
     };

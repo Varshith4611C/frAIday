@@ -382,6 +382,18 @@
       </div>
 
       <div class="cockpit-content" id="cockpit-scroll-area">
+        <!-- API Key Missing Notification Banner -->
+        <div id="api-key-banner" style="display:none;margin:10px 12px 6px;background:linear-gradient(135deg, rgba(245,158,11,0.14), rgba(239,68,68,0.08));border:1px solid rgba(245,158,11,0.4);border-radius:8px;padding:9px 12px;align-items:center;justify-content:space-between;gap:10px;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:16px;">🔑</span>
+            <div>
+              <div style="font-size:11.5px;font-weight:700;color:#fbbf24;">API Key Required</div>
+              <div style="font-size:10.5px;color:#cbd5e1;line-height:1.3;">Please enter your API key to activate AI agent execution. Keys are stored locally only.</div>
+            </div>
+          </div>
+          <button id="btn-banner-enter-key" class="btn btn-primary btn-xs" style="padding:4px 10px;font-size:11px;font-weight:600;white-space:nowrap;background:#f59e0b;border-color:#d97706;color:#000;">Enter Key</button>
+        </div>
+
         <!-- Chat & Execution Timeline -->
         <div id="chat-timeline" class="chat-timeline">
           <!-- Active Monologue Card -->
@@ -455,10 +467,10 @@
           <span id="key-provider-hint" style="font-size:11px;color:#38bdf8;font-family:var(--font-mono);">Groq Key (gsk_...)</span>
         </div>
         <div style="position:relative;display:flex;align-items:center;">
-          <input type="password" id="setting-api-key" placeholder="Enter Groq keys separated by commas (11 keys pooled)..." style="width:100%;background:rgba(15,23,42,0.9);border:1px solid var(--border-medium);border-radius:6px;padding:9px 40px 9px 12px;color:#fff;font-family:var(--font-mono);font-size:12px;outline:none;" />
+          <input type="password" id="setting-api-key" placeholder="Enter API key (e.g. gsk_...) or comma-separated pool..." style="width:100%;background:rgba(15,23,42,0.9);border:1px solid var(--border-medium);border-radius:6px;padding:9px 40px 9px 12px;color:#fff;font-family:var(--font-mono);font-size:12px;outline:none;" />
           <button type="button" id="btn-toggle-key-visibility" title="Show/Hide API Key" style="position:absolute;right:8px;background:transparent;border:none;color:#94a3b8;cursor:pointer;font-size:15px;padding:4px 6px;line-height:1;">👁️</button>
         </div>
-        <span id="key-helper-text" style="font-size:10.5px;color:#38bdf8;margin-top:4px;display:block;">⚡ Multi-Key Auto-Rotation Active: 11 Groq keys pooled for ultra-high rate limits & zero-downtime failover!</span>
+        <span id="key-helper-text" style="font-size:10.5px;color:#94a3b8;margin-top:4px;display:block;">Enter your API key. Stored locally in your browser and never pushed to GitHub.</span>
       </div>
 
       <!-- Model Selection: Presets Dropdown + Exact Model Input -->
@@ -528,6 +540,66 @@
         <button type="button" id="btn-cancel-settings" onclick="window.closeSettingsModalFallback()" class="btn btn-secondary btn-sm">Cancel</button>
         <button type="button" id="btn-save-settings" onclick="window.saveSettingsFallback()" class="btn btn-primary btn-sm">Save Configuration</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Dedicated API Key Prompt Modal -->
+<div class="modal-overlay" id="api-key-modal">
+  <div class="modal-dialog" style="width: 520px; max-width: 95vw;">
+    <div class="modal-header">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span style="font-size:18px;">🔑</span>
+        <span style="font-weight:700;font-size:14px;color:#f8fafc;" id="api-key-modal-title">Enter API Key</span>
+      </div>
+      <button id="btn-close-api-key-modal" style="background:transparent;border:none;color:#94a3b8;font-size:20px;cursor:pointer;padding:4px 8px;line-height:1;" title="Close">×</button>
+    </div>
+    <div class="modal-body" style="padding:16px 20px;display:flex;flex-direction:column;gap:14px;">
+      <div id="api-key-modal-reason" style="font-size:12.5px;color:#e2e8f0;line-height:1.5;">
+        An API key is required to power frAIday's autonomous coding, reasoning, and execution loop.
+      </div>
+
+      <div style="background:rgba(56,189,248,0.08);border:1px solid rgba(56,189,248,0.25);border-radius:8px;padding:10px 12px;font-size:11.5px;color:#93c5fd;line-height:1.45;display:flex;align-items:flex-start;gap:8px;">
+        <span style="font-size:14px;">🔒</span>
+        <div>
+          <strong>GitHub Safe:</strong> Your key is stored solely in your browser's local storage and used directly for inference requests. It is <strong>never</strong> committed to git or pushed to GitHub.
+        </div>
+      </div>
+
+      <!-- Provider Selection -->
+      <div>
+        <label style="display:block;font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Select AI Provider</label>
+        <select id="quick-key-provider" class="policy-dropdown" style="width:100%;padding:9px 12px;font-size:12px;border-radius:6px;background:rgba(15,23,42,0.9);border:1px solid var(--border-medium);color:#f8fafc;">
+          <option value="groq" selected>Groq LPU (Ultra-Fast Inference · Recommended)</option>
+          <option value="nvidia">NVIDIA NIM Cloud</option>
+          <option value="openai">OpenAI (GPT-4o / Mini)</option>
+          <option value="ollama">Ollama (Localhost · No key required)</option>
+        </select>
+      </div>
+
+      <!-- API Key Input Field -->
+      <div id="quick-key-input-container">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <label style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">API Key</label>
+          <a id="quick-key-signup-link" href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer" style="font-size:11px;color:#38bdf8;text-decoration:none;font-weight:500;">Get free Groq key ↗</a>
+        </div>
+        <div style="position:relative;display:flex;align-items:center;">
+          <input type="password" id="quick-api-key-input" placeholder="Paste your API key here (e.g. gsk_...)" style="width:100%;background:rgba(15,23,42,0.9);border:1px solid var(--border-medium);border-radius:6px;padding:9px 40px 9px 12px;color:#fff;font-family:var(--font-mono);font-size:12px;outline:none;" />
+          <button type="button" id="btn-toggle-quick-key-visibility" title="Show/Hide Key" style="position:absolute;right:8px;background:transparent;border:none;color:#94a3b8;cursor:pointer;font-size:15px;padding:4px 6px;">👁️</button>
+        </div>
+        <span id="quick-key-hint" style="font-size:10.5px;color:#94a3b8;margin-top:4px;display:block;">Groq API keys start with <code>gsk_</code>. Supports comma-separated keys for auto-rotation.</span>
+      </div>
+
+      <!-- Error message banner if validation fails -->
+      <div id="quick-key-error" style="display:none;background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.4);color:#f87171;padding:8px 12px;border-radius:6px;font-size:11.5px;"></div>
+    </div>
+
+    <div class="modal-footer" style="padding:12px 20px;display:flex;justify-content:space-between;align-items:center;">
+      <button type="button" id="btn-cancel-quick-key" class="btn btn-secondary btn-sm">Cancel</button>
+      <button type="button" id="btn-save-quick-key" class="btn btn-primary btn-sm" style="display:flex;align-items:center;gap:6px;">
+        <span>Save & Continue</span>
+        <span>➔</span>
+      </button>
     </div>
   </div>
 </div>
@@ -638,6 +710,36 @@
       const hud = document.getElementById('hud-model-name');
       if (hud) hud.innerText = p.toUpperCase() + ' (' + m.split('/').pop() + ')';
       window.closeSettingsModalFallback();
+    }
+  };
+
+  window.openApiKeyModalFallback = function(reason, goal) {
+    const app = window.frAidayApp || window.fraidayApp;
+    if (app && typeof app.showApiKeyModal === 'function') {
+      app.showApiKeyModal(reason, goal);
+    } else {
+      const m = document.getElementById('api-key-modal');
+      if (m) {
+        m.classList.add('open');
+        m.style.display = 'flex';
+        m.style.opacity = '1';
+        m.style.visibility = 'visible';
+      }
+    }
+  };
+
+  window.closeApiKeyModalFallback = function() {
+    const app = window.frAidayApp || window.fraidayApp;
+    if (app && typeof app.closeApiKeyModal === 'function') {
+      app.closeApiKeyModal();
+    } else {
+      const m = document.getElementById('api-key-modal');
+      if (m) {
+        m.classList.remove('open');
+        m.style.display = 'none';
+        m.style.opacity = '0';
+        m.style.visibility = 'hidden';
+      }
     }
   };
 </script>

@@ -497,6 +497,24 @@ class EmbeddedHindsightEngine:
         self._seed_default_bank(bank_id, force=True)
         return self.get_bank_summary(bank_id)
 
+    def clear_bank(self, bank_id):
+        bank = self._ensure_bank(bank_id)
+        now = datetime.now().isoformat()
+        self.banks[bank_id] = {
+            "id": bank_id,
+            "name": "frAIday Codebase & Incident Memory Bank",
+            "created_at": now,
+            "mental_models": [],
+            "observations": [],
+            "world_facts": [],
+            "experience_facts": [],
+            "audit_log": [
+                {"action": "clear", "timestamp": now, "details": "Cleared all memories from bank."}
+            ]
+        }
+        self._save()
+        return self.get_bank_summary(bank_id)
+
 
 class HindsightService:
     """
@@ -618,6 +636,10 @@ class HindsightService:
     def reset_scenarios(self, bank_id=None):
         target_bank = bank_id or self.bank_id
         return self.embedded.reset_scenarios(target_bank)
+
+    def clear_bank(self, bank_id=None):
+        target_bank = bank_id or self.bank_id
+        return self.embedded.clear_bank(target_bank)
 
 
 # Singleton instance for frAIday server

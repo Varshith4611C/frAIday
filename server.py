@@ -594,11 +594,19 @@ class FrAIdayHandler(http.server.SimpleHTTPRequestHandler):
             self.send_json(200, res)
             return
 
-        if path == "/api/hindsight/reset-scenarios":
+        if path in ("/api/hindsight/reset-scenarios", "/api/hindsight/reset"):
             if not HINDSIGHT:
                 self.send_json(500, {"error": "Hindsight unavailable"})
                 return
             res = HINDSIGHT.reset_scenarios(bank_id=body.get("bank_id"))
+            self.send_json(200, res)
+            return
+
+        if path == "/api/hindsight/clear":
+            if not HINDSIGHT:
+                self.send_json(500, {"error": "Hindsight unavailable"})
+                return
+            res = HINDSIGHT.clear_bank(bank_id=body.get("bank_id"))
             self.send_json(200, res)
             return
 

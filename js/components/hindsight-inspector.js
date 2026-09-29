@@ -133,11 +133,17 @@ export class HindsightInspector {
   }
 
   async resetScenarios() {
-    if (!confirm('Reset Hindsight memory bank to benchmark hackathon scenarios?')) return;
+    const choice = confirm('Do you want to reset Vectorize Hindsight Memory Bank?\n\n• OK: Reset to benchmark state (clears past learned preferences & restores clean baseline)\n• Cancel: Keep current memories');
+    if (!choice) return;
     try {
-      await fetch(`${this.apiBase}/api/hindsight/reset-scenarios`, { method: 'POST' });
+      await fetch(`${this.apiBase}/api/hindsight/reset`, { method: 'POST' });
+      this.recallStream = [];
       await this.refreshData();
-      alert('Hindsight Memory Bank re-seeded with benchmark scenarios!');
+      if (typeof window !== 'undefined' && window.fraidayApp) {
+        window.fraidayApp.updateHindsightHudPill(this.isHindsightEnabled);
+        window.fraidayApp.renderSidebarHindsightQuickView();
+      }
+      alert('✅ Hindsight Memory Bank has been successfully reset!');
     } catch (err) {
       alert(`Reset failed: ${err.message}`);
     }
@@ -173,7 +179,10 @@ export class HindsightInspector {
             </div>
           </div>
 
-          <div class="hs-header-right">
+          <div class="hs-header-right" style="display:flex;align-items:center;gap:10px;">
+            <button class="btn btn-secondary btn-sm" id="hs-btn-reset-scenarios" style="display:flex;align-items:center;gap:5px;border-color:rgba(239,68,68,0.4);color:#fca5a5;" title="Reset Hindsight Memory Bank back to benchmark conventions">
+              <span>🔄</span> Reset Memory Bank
+            </button>
             <!-- Mode Toggle Switch -->
             <div class="hs-mode-switcher ${this.isHindsightEnabled ? 'mode-active' : 'mode-baseline'}" title="Toggle between Hindsight Learning Agent and Stateless Baseline Agent for demo comparison">
               <span class="hs-mode-label">${this.isHindsightEnabled ? '● Hindsight Active' : '○ Stateless Baseline'}</span>

@@ -183,10 +183,16 @@ class AppCoordinator {
     this.agentEngine.onHindsightRecall = (recallData) => {
       this.hindsightInspector.handleRecallEvent(recallData);
       this.updateHindsightHudPill(this.agentEngine.hindsightEnabled !== false, recallData.count);
+      if (recallData && recallData.results && recallData.results.length > 0) {
+        this.renderHindsightRecallInChat(recallData);
+      }
     };
     this.agentEngine.onHindsightRetain = (retainData) => {
       this.hindsightInspector.handleRetainEvent(retainData);
       this.updateHindsightHudPill(this.agentEngine.hindsightEnabled !== false);
+      if (retainData && (retainData.success || retainData.item)) {
+        this.renderHindsightRetainInChat(retainData);
+      }
     };
 
     // 2. Setup DOM Events
@@ -2520,6 +2526,117 @@ class AppCoordinator {
     }
   }
 
+  renderHindsightRecallInChat(recallData, customTime = null, skipRecord = false) {
+    const chatTimeline = document.getElementById('chat-timeline');
+    if (!chatTimeline || !recallData || !recallData.results || recallData.results.length === 0) return;
+
+    const row = document.createElement('div');
+    row.className = 'chat-msg-row chat-hindsight-recall-row';
+    row.style.display = 'flex';
+    row.style.flexDirection = 'column';
+    row.style.gap = '6px';
+    row.style.marginBottom = '12px';
+
+    const timeStr = customTime || (new Date()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const count = recallData.results.length;
+
+    const escape = (str) => {
+      if (!str) return '';
+      return String(str).replace(/[&<>"']/g, s => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[s]);
+    };
+
+    row.innerHTML = `
+      <div class="chat-sender-row">
+        <span class="chat-sender-avatar">🧠</span>
+        <span class="chat-sender-name">Vectorize Hindsight Memory</span>
+        <span class="chat-sender-badge" style="background:rgba(192,132,252,0.18);color:#c084fc;border:1px solid rgba(192,132,252,0.35);">
+          TEMPR Recall · ${count} Memories Injected
+        </span>
+        <span class="chat-time">${timeStr}</span>
+      </div>
+      <div class="chat-bubble-agent" style="border-color:rgba(192,132,252,0.4);background:rgba(25,18,35,0.95);color:#e2e8f0;">
+        <div style="font-weight:700;color:#c084fc;margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;">
+          <span>🧠 Recalled Past Experiences & Stored Preferences</span>
+          <span style="font-size:11px;font-weight:normal;color:#a855f7;">${count} relevant memory item(s)</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;font-size:11.5px;">
+          ${recallData.results.slice(0, 4).map(m => `
+            <div style="background:rgba(255,255,255,0.04);border-left:3px solid #c084fc;padding:6px 10px;border-radius:4px;">
+              <div style="font-weight:600;color:#f3e8ff;margin-bottom:2px;display:flex;justify-content:space-between;">
+                <span>${escape(m.title || m.tier)}</span>
+                <span style="font-size:10px;color:#a855f7;background:rgba(168,85,247,0.15);padding:1px 5px;border-radius:8px;">${escape(m.tier)}</span>
+              </div>
+              <div style="color:#cbd5e1;line-height:1.4;">${escape(m.text || m.fact || m.directive || m.resolution)}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+
+    chatTimeline.appendChild(row);
+
+    if (!skipRecord && this.agentEngine) {
+      this.agentEngine.recordTimelineEvent({ type: 'hindsight_recall', recallData, timestamp: timeStr });
+    }
+
+    const cockpitScroll = document.getElementById('cockpit-scroll-area');
+    if (cockpitScroll) {
+      cockpitScroll.scrollTop = cockpitScroll.scrollHeight;
+    }
+  }
+
+  renderHindsightRetainInChat(retainData, customTime = null, skipRecord = false) {
+    const chatTimeline = document.getElementById('chat-timeline');
+    if (!chatTimeline || !retainData) return;
+
+    const row = document.createElement('div');
+    row.className = 'chat-msg-row chat-hindsight-retain-row';
+    row.style.display = 'flex';
+    row.style.flexDirection = 'column';
+    row.style.gap = '6px';
+    row.style.marginBottom = '12px';
+
+    const timeStr = customTime || (new Date()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const escape = (str) => {
+      if (!str) return '';
+      return String(str).replace(/[&<>"']/g, s => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[s]);
+    };
+
+    const item = retainData.item || {};
+    const text = item.directive || item.fact || item.resolution || retainData.content || 'Learned preference saved.';
+
+    row.innerHTML = `
+      <div class="chat-sender-row">
+        <span class="chat-sender-avatar">🧠</span>
+        <span class="chat-sender-name">Vectorize Hindsight Memory</span>
+        <span class="chat-sender-badge" style="background:rgba(56,189,248,0.18);color:#38bdf8;border:1px solid rgba(56,189,248,0.35);">
+          Memory Retained · Saved to Bank
+        </span>
+        <span class="chat-time">${timeStr}</span>
+      </div>
+      <div class="chat-bubble-agent" style="border-color:rgba(56,189,248,0.4);background:rgba(10,25,38,0.95);color:#e2e8f0;">
+        <div style="font-weight:700;color:#38bdf8;margin-bottom:4px;display:flex;align-items:center;gap:6px;">
+          <span>💾 Memory Successfully Stored</span>
+          <span style="font-size:11px;font-weight:normal;color:#94a3b8;">(${escape(retainData.memory_type || 'observation')})</span>
+        </div>
+        <div style="font-size:11.5px;color:#cbd5e1;background:rgba(255,255,255,0.04);border-left:3px solid #38bdf8;padding:6px 10px;border-radius:4px;line-height:1.4;">
+          ${escape(text)}
+        </div>
+      </div>
+    `;
+
+    chatTimeline.appendChild(row);
+
+    if (!skipRecord && this.agentEngine) {
+      this.agentEngine.recordTimelineEvent({ type: 'hindsight_retain', retainData, timestamp: timeStr });
+    }
+
+    const cockpitScroll = document.getElementById('cockpit-scroll-area');
+    if (cockpitScroll) {
+      cockpitScroll.scrollTop = cockpitScroll.scrollHeight;
+    }
+  }
+
   async rehydrateSession(forceBackend = false) {
     let sessionData = null;
     const storageKey = `fraiday_session_${this.activeWorkspace || 'default'}`;
@@ -2629,6 +2746,10 @@ class AppCoordinator {
           this.renderSystemAlertInChat(ev.alertData, ev.timestamp, true);
         } else if (ev.type === 'verification_screenshot') {
           this.renderVerificationScreenshotInChat(ev.result, ev.timestamp, true);
+        } else if (ev.type === 'hindsight_recall') {
+          this.renderHindsightRecallInChat(ev.recallData, ev.timestamp, true);
+        } else if (ev.type === 'hindsight_retain') {
+          this.renderHindsightRetainInChat(ev.retainData, ev.timestamp, true);
         } else if (ev.type === 'halted_card') {
           this.renderHaltedCardInChat(ev.haltData, ev.timestamp, true);
         }

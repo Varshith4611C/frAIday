@@ -194,6 +194,12 @@ You are powered by Vectorize Hindsight—an agent memory system that learns over
 1. When you start any task, past repository conventions, mental models, and incident post-mortems are recalled into your context.
 2. You MUST strictly adhere to recalled mental models and verified observations (e.g. database ports, framework versions, build conventions).
 3. If you discover a novel architectural pattern, resolve a tricky bug, or receive developer instructions, you can call retain_memory to store this lesson permanently into Hindsight so you never repeat the mistake in future sessions.
+4. CRITICAL USER PREFERENCES RETENTION:
+   Whenever the user expresses personal preferences, design aesthetics, color schemes (e.g. "I prefer blue theme", "never use dark theme", "use light theme", "prefer tabs over spaces"), or project conventions:
+   You MUST IMMEDIATELY call the retain_memory tool to permanently store this preference into Vectorize Hindsight!
+   Set memory_type: "mental_model" or "observation" with a clear directive and tags so it persists across all future sessions.
+5. EXPLICIT MEMORY RECALL:
+   If the user says "use my previous preferences", "what are my preferences?", or references past tasks, you can call recall_memory to fetch all matching memories from Hindsight.
 </hindsight_memory_layer>
 
 <planning_mode>
@@ -892,6 +898,26 @@ export class AgentEngine {
               <span>Entrypoint: ${escapeHtml(toolResult?.entrypoint || 'index.html')}</span>
             </div>
           `;
+        } else if (toolName === 'retain_memory') {
+          const item = toolResult?.item || {};
+          resHtml = `
+            <div style="color:#c084fc;font-weight:600;display:flex;align-items:center;gap:6px;">
+              <span>🧠</span> <span>Hindsight Retained (${escapeHtml(toolResult?.memory_type || 'observation')})</span>
+            </div>
+            <div style="font-size:11px;color:#cbd5e1;margin-top:3px;background:rgba(192,132,252,0.06);padding:5px 8px;border-radius:4px;border-left:2px solid #c084fc;">
+              ${escapeHtml(item.directive || item.fact || item.resolution || toolResult?.content || 'Preference saved to Hindsight')}
+            </div>
+          `;
+        } else if (toolName === 'recall_memory') {
+          const list = toolResult?.results || [];
+          resHtml = `
+            <div style="color:#38bdf8;font-weight:600;display:flex;align-items:center;gap:6px;">
+              <span>🧠</span> <span>Hindsight Recalled (${list.length} items)</span>
+            </div>
+            ${list.slice(0, 3).map(m => `
+              <div style="font-size:10.5px;color:#94a3b8;margin-top:2px;">• <strong style="color:#cbd5e1;">${escapeHtml(m.title || m.tier)}:</strong> ${escapeHtml((m.text || m.fact || m.directive || '').slice(0, 100))}</div>
+            `).join('')}
+          `;
         } else {
           resHtml = `<div style="color:#10b981;">✔ ${escapeHtml(extraText || 'Execution completed.')}</div>`;
         }
@@ -1312,6 +1338,14 @@ export class AgentEngine {
         if (this.onVerificationScreenshotReady) {
           this.onVerificationScreenshotReady(result);
         }
+      }
+    } else if (toolName === 'retain_memory') {
+      if (this.onHindsightRetain) {
+        this.onHindsightRetain(result);
+      }
+    } else if (toolName === 'recall_memory') {
+      if (this.onHindsightRecall) {
+        this.onHindsightRecall(result);
       }
     }
 
